@@ -1,8 +1,11 @@
-# Zent Backend — Module 1: Identity & Access
+# Zent Backend
 
-FastAPI service covering registration, login, sessions, OAuth (Google/Apple),
-profile, email verification, and password reset. See
-[`MODULE_BREAKDOWN.md`](./MODULE_BREAKDOWN.md) for scope.
+FastAPI service. See [`MODULE_BREAKDOWN.md`](./MODULE_BREAKDOWN.md) for full scope.
+
+- **Module 1 — Identity & Access:** registration, login, sessions, OAuth
+  (Google live; Apple coded, deferred), profile, email verification, password reset.
+- **Module 2 — Property Catalogue:** listing + pagination, search/filter,
+  detail, role-gated admin CRUD.
 
 ## Stack
 - FastAPI + Uvicorn
@@ -50,6 +53,49 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 
 Errors use `{ "error": { "code", "message" } }`; validation errors add `fields[]`.
 
+## Properties (Module 2)
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/properties` | – | Paginated listing + filters |
+| GET | `/properties/{id}` | – | Single property (404 envelope if missing) |
+| POST | `/properties` | admin/agent | Create |
+| PUT | `/properties/{id}` | admin/agent | Partial update (only provided keys) |
+| DELETE | `/properties/{id}` | admin/agent | Remove (204) |
+
+`GET /properties` query params: `page` (1), `limit` (1–100, default 9),
+`category` (Rent/Shortlet, case-insensitive), `location` (case-insensitive
+substring), `type` (mapped onto `period`: Monthly→"Per Month",
+Nightly→"Per Night"), `priceMin`, `priceMax`, `q` (free-text over
+title/location/description), `sort` (`id` | `-id` | `price` | `-price` |
+`newest` | `oldest`; default `id`). Response envelope:
+`{ properties[], total, page, limit, totalPages }`.
+
+Both GET routes are rate-limited (`LIST_RATE_LIMIT`, default 300/60 per IP) and
+send `ETag` + `Cache-Control: public, max-age=<PROPERTIES_CACHE_MAX_AGE>`; a
+matching `If-None-Match` gets `304`.
+
+Grant a user staff access: `uv run python scripts/grant_role.py <email> admin`.
+Seed 72 demo properties: `uv run python scripts/seed_properties.py [--force]`.
+
+### Media uploads (Cloudinary)
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/media/upload` | admin/agent | `multipart/form-data` `files[]` (+ `resource_type` = `image`\|`video`) → `{ assets: [{ url, publicId, ... }] }` |
+| POST | `/media/sign` | admin/agent | Params for a signed browser→Cloudinary direct upload |
+| POST | `/media/delete` | admin/agent | `{ publicId, resourceType }` → destroy one asset |
+
+`image` / `gallery[]` on a property stay plain URL strings (PRD contract).
+Pass the optional `imagePublicId` / `galleryPublicIds` from an upload response
+when creating/updating a property — they're stored (not returned). Assets are
+destroyed on `DELETE /properties/{id}` **and** on `PUT` for any public id the
+update dereferences. Needs `CLOUDINARY_*` env vars; endpoints return
+`503 media_not_configured` without them.
+
+**Orphan sweep:** the maintenance loop (`run_cleanup_once`) also lists the
+Cloudinary folder and destroys any asset no property references (by stored
+public id *or* by URL) that is older than `MEDIA_SWEEP_GRACE_SECONDS`
+(default 24h). Toggle with `MEDIA_SWEEP_ENABLED`.
+
 ### Sliding token refresh (PRD 6.2)
 Any authenticated response whose token is past `TOKEN_RENEW_THRESHOLD_RATIO`
 (default 0.5) of its lifetime carries a fresh token in the `X-Renewed-Token`
@@ -64,8 +110,8 @@ Per-client-IP sliding window on `/auth/register`, `/auth/login`,
 
 ### Background cleanup
 A loop started in the app lifespan purges expired rows from `token_denylist`,
-`oauth_states`, `email_verification_tokens`, `password_reset_tokens` every
-`CLEANUP_INTERVAL_SECONDS`. Run it by hand:
+`oauth_states`, `email_verification_tokens`, `password_reset_tokens` and sweeps
+orphaned Cloudinary assets every `CLEANUP_INTERVAL_SECONDS`. Run it by hand:
 `python -c "import asyncio; from app.services.maintenance import run_cleanup_once; asyncio.run(run_cleanup_once())"`.
 
 ## Tests

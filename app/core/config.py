@@ -34,10 +34,18 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT: str = "10/60"           # 10 attempts / 60s
     REGISTER_RATE_LIMIT: str = "5/60"
     FORGOT_PASSWORD_RATE_LIMIT: str = "5/300"
+    LIST_RATE_LIMIT: str = "300/60"           # public catalogue reads
+
+    # --- Catalogue response caching ---------------------------------------
+    PROPERTIES_CACHE_MAX_AGE: int = 60        # seconds; 0 disables Cache-Control
 
     # --- Background maintenance ---------------------------------------------
     CLEANUP_ENABLED: bool = True
     CLEANUP_INTERVAL_SECONDS: int = 3600
+    # Sweep Cloudinary for assets no property references (grace period protects
+    # freshly-uploaded-but-not-yet-attached files).
+    MEDIA_SWEEP_ENABLED: bool = True
+    MEDIA_SWEEP_GRACE_SECONDS: int = 86400
 
     # --- Frontend / CORS -----------------------------------------------------
     FRONTEND_BASE_URL: str = "https://zentbookings.com"
@@ -79,6 +87,12 @@ class Settings(BaseSettings):
     # "starttls" -> port 587, "ssl" -> port 465 (implicit TLS), "none" -> plaintext
     SMTP_SECURITY: str = "starttls"
 
+    # --- Cloudinary (property media) --------------------------------------
+    CLOUDINARY_CLOUD_NAME: str | None = None
+    CLOUDINARY_API_KEY: str | None = None
+    CLOUDINARY_API_SECRET: str | None = None
+    CLOUDINARY_UPLOAD_FOLDER: str = "zent/properties"
+
     # --- Derived helpers -----------------------------------------------------
     @property
     def cors_origins_list(self) -> list[str]:
@@ -92,6 +106,14 @@ class Settings(BaseSettings):
     @property
     def google_configured(self) -> bool:
         return bool(self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET)
+
+    @property
+    def cloudinary_configured(self) -> bool:
+        return bool(
+            self.CLOUDINARY_CLOUD_NAME
+            and self.CLOUDINARY_API_KEY
+            and self.CLOUDINARY_API_SECRET
+        )
 
     @property
     def apple_configured(self) -> bool:

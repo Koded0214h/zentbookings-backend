@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth
+from app.api.routes import auth, media, properties
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.services.maintenance import cleanup_loop
@@ -48,6 +48,8 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(auth.router, prefix=settings.API_PREFIX)
+    app.include_router(properties.router, prefix=settings.API_PREFIX)
+    app.include_router(media.router, prefix=settings.API_PREFIX)
 
     if not settings.PROD:
         from app.api.routes import dev

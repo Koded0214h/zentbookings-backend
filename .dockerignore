@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.vscode
+.env
+*.p8
+*.sqlite3
+tests
+scripts
+PRODUCT_REQUIREMENTS.md
+MODULE_BREAKDOWN.md

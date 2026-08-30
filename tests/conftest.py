@@ -84,3 +84,83 @@ async def registered_user(client):
     res = await client.post("/api/auth/register", json=payload)
     assert res.status_code == 201, res.text
     return {"payload": payload, "body": res.json()}
+
+
+@pytest_asyncio.fixture
+async def admin_auth(client, session_factory):
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    res = await client.post(
+        "/api/auth/register",
+        json={
+            "firstName": "Admin",
+            "lastName": "User",
+            "email": "admin@example.com",
+            "password": "SecurePass123",
+        },
+    )
+    token = res.json()["token"]
+    async with session_factory() as db:
+        user = (
+            await db.execute(select(User).where(User.email == "admin@example.com"))
+        ).scalar_one()
+        user.role = "admin"
+        await db.commit()
+    return {"Authorization": f"Bearer {token}"}
+
+
+def sample_property(**overrides) -> dict:
+    body = {
+        "title": "The Obsidian Loft",
+        "location": "Victoria Island, Lagos",
+        "image": "https://cdn.zentbookings.com/images/prop-1.jpg",
+        "gallery": ["https://cdn.zentbookings.com/images/prop-1-1.jpg"],
+        "beds": 3,
+        "baths": 3,
+        "sqft": 2800,
+        "price": 850000,
+        "period": "Per Month",
+        "yearBuilt": 2023,
+        "amenities": ["Smart Home System", "Private Pool", "24/7 Security"],
+        "description": "Where Precision Meets Panorama",
+        "fullDescription": "Full property writeup with lots of detail.",
+        "dotColor": "#FFE501",
+        "category": "Rent",
+    }
+    body.update(overrides)
+    return body
+
+
+@pytest_asyncio.fixture
+async def seeded_properties(session_factory):
+    """Insert a deterministic mix straight into the DB for list/filter tests."""
+    from app.models.property import Property
+
+    rows = []
+    for i in range(1, 26):  # 25 rows
+        rent = i % 2 == 0
+        rows.append(
+            Property(
+                title=f"Unit {i}",
+                location="Lekki Phase 1, Lagos" if i % 3 == 0 else "Ikoyi, Lagos",
+                image=f"https://cdn.zentbookings.com/p/{i}.jpg",
+                gallery=[],
+                beds=(i % 4) + 1,
+                baths=(i % 3) + 1,
+                sqft=1000 + i * 50,
+                price=(100_000 * i) if rent else (20_000 * i),
+                period="Per Month" if rent else "Per Night",
+                year_built=2016 + (i % 8),
+                amenities=["Gym"] if i % 2 else ["Pool", "Gym"],
+                description=f"Desc {i}",
+                full_description=f"Full desc {i}",
+                dot_color="#111111",
+                category="Rent" if rent else "Shortlet",
+            )
+        )
+    async with session_factory() as db:
+        db.add_all(rows)
+        await db.commit()
+    return len(rows)
