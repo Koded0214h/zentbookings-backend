@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zent
+      POSTGRES_PASSWORD: zent
+      POSTGRES_DB: zent
+    ports:
+      - "5432:5432"
+    volumes:
+      - zent_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  zent_pgdata:
