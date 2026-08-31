@@ -165,6 +165,29 @@ per `LAST_SEEN_THROTTLE_SECONDS` (900). Visible in the admin user views only.
 `ATTENDANCE_AUTO_CLOSE_HOURS` (16, `autoClosed=true`). `AUDIT_RETENTION_DAYS`
 (0 = keep) optionally prunes the audit log.
 
+## Observability
+
+A pure-ASGI middleware times every request, records in-memory metrics, and
+stamps an `X-Request-ID` header (also exposed via CORS). All endpoints are
+**public by default** — set `OBSERVABILITY_TOKEN` to require `?token=` or an
+`X-Observability-Token` header. `OBSERVABILITY_ENABLED=false` disables the
+middleware and routes entirely.
+
+| Path | |
+|---|---|
+| `GET /observability` | self-contained HTML dashboard (inline CSS/JS, auto-refresh 3s) — uptime, req/s, error rate, p50/p90/p99 latency, status-class bar, top/slowest routes, recent errors + requests |
+| `GET /observability/metrics` | JSON snapshot the dashboard polls |
+| `GET /observability/logs` | recent request + error ring buffers |
+| `GET /observability/prometheus` | Prometheus text exposition |
+
+Metrics are in-memory (single instance, reset on restart): latency percentiles
+over the last `METRICS_SAMPLE_SIZE` (2000) requests, ring buffers of the last
+`METRICS_RECENT_SIZE` (100). Route labels are low-cardinality templates
+(`/api/properties/{property_id}`); its own paths, `/health`, and docs are not
+counted. Logging is configured by `LOG_LEVEL` and `LOG_FORMAT` (`text` | `json`);
+sensitive query params (`token`, `code`, `password`, …) are redacted before
+anything is logged or stored.
+
 ### Sliding token refresh (PRD 6.2)
 Any authenticated response whose token is past `TOKEN_RENEW_THRESHOLD_RATIO`
 (default 0.5) of its lifetime carries a fresh token in the `X-Renewed-Token`

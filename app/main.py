@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,6 +11,7 @@ from app.api.routes import (
     agent,
     auth,
     media,
+    observability,
     properties,
     public_agents,
     staff,
@@ -19,9 +19,11 @@ from app.api.routes import (
 )
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.core.logging import configure_logging
+from app.core.observability import ObservabilityMiddleware
 from app.services.maintenance import cleanup_loop
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 
 
 @asynccontextmanager
@@ -52,8 +54,10 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
-        expose_headers=["X-Renewed-Token"],
+        expose_headers=["X-Renewed-Token", "X-Request-ID"],
     )
+    # added last -> outermost: times the whole stack, stamps X-Request-ID
+    app.add_middleware(ObservabilityMiddleware)
 
     register_exception_handlers(app)
     app.include_router(auth.router, prefix=settings.API_PREFIX)
@@ -64,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(staff.router, prefix=settings.API_PREFIX)
     app.include_router(agent.router, prefix=settings.API_PREFIX)
     app.include_router(public_agents.router, prefix=settings.API_PREFIX)
+    app.include_router(observability.router)  # no /api prefix, no auth
 
     if not settings.PROD:
         from app.api.routes import dev

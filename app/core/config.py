@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     PROD: bool = False
     API_PREFIX: str = "/api"
 
+    # --- Logging & observability -----------------------------------------
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "text"                  # "text" or "json"
+    OBSERVABILITY_ENABLED: bool = True
+    # optional gate: if set, /observability* needs ?token= or X-Observability-Token
+    OBSERVABILITY_TOKEN: str | None = None
+    METRICS_SAMPLE_SIZE: int = 2000          # latency samples kept for percentiles
+    METRICS_RECENT_SIZE: int = 100           # recent request/error ring buffer
+
     # --- Database ----------------------------------------------------------------
     DATABASE_URL: str = "postgresql+asyncpg://zent:zent@localhost:5432/zent"
 

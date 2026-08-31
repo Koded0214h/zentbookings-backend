@@ -15,7 +15,10 @@ from app.services.email.base import EmailSender
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
+    from app.core.observability import metrics
+
     limiter.reset()
+    metrics.reset()
     yield
     limiter.reset()
 
