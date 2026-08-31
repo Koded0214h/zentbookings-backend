@@ -65,6 +65,31 @@ async def get_current_user(
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
+_bearer_optional = HTTPBearer(auto_error=False, description="JWT access token (optional)")
+
+
+async def get_current_user_optional(
+    db: DbSession,
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_optional)] = None,
+) -> User | None:
+    """None when no token is presented; still 401s on a present-but-bad token."""
+    if creds is None:
+        return None
+    try:
+        payload = decode_access_token(creds.credentials)
+    except jwt.PyJWTError:
+        raise _Unauthorized("Invalid or expired session.") from None
+    jti, sub = payload.get("jti"), payload.get("sub")
+    if not jti or not sub or await is_token_revoked(db, jti):
+        raise _Unauthorized("Invalid session token.")
+    user = await db.get(User, sub)
+    if user is None or not user.is_active:
+        raise _Unauthorized("Account is unavailable.")
+    return user
+
+
+OptionalUser = Annotated[User | None, Depends(get_current_user_optional)]
+
 
 async def get_token_claims(
     creds: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],

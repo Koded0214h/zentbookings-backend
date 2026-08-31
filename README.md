@@ -6,6 +6,9 @@ FastAPI service. See [`MODULE_BREAKDOWN.md`](./MODULE_BREAKDOWN.md) for full sco
   (Google live; Apple coded, deferred), profile, email verification, password reset.
 - **Module 2 — Property Catalogue:** listing + pagination, search/filter,
   detail, role-gated admin CRUD.
+- **Module 3 — Tour Booking:** guest + authed bookings, per-property
+  scheduling (slots/capacity/blackouts/timezone), availability lookup,
+  staff management, email notifications.
 
 ## Stack
 - FastAPI + Uvicorn
@@ -95,6 +98,35 @@ update dereferences. Needs `CLOUDINARY_*` env vars; endpoints return
 Cloudinary folder and destroys any asset no property references (by stored
 public id *or* by URL) that is older than `MEDIA_SWEEP_GRACE_SECONDS`
 (default 24h). Toggle with `MEDIA_SWEEP_ENABLED`.
+
+## Tours (Module 3)
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/properties/{id}/availability` | – | Slots for `?on=YYYY-MM-DD` or `?from=&to=` (default = advance window) |
+| POST | `/tours` | optional | Book a tour. Auth optional; if signed in, links the user and fills missing visitor fields from the profile. Rate-limited. |
+| GET | `/tours` | Bearer | Own tours; **staff** see all + `?status=`/`?propertyId=` filters. Paginated. |
+| GET | `/tours/{id}` | Bearer | Owner or staff |
+| DELETE | `/tours/{id}` | Bearer | Owner/staff cancel (soft → `CANCELLED`) |
+| POST | `/tours/lookup` | – | Guest self-service: `{ confirmationCode, email }` → tour |
+| POST | `/tours/cancel` | – | Guest cancel by `{ confirmationCode, email }` |
+| POST | `/tours/{id}/confirm` | admin/agent | `PENDING` → `CONFIRMED` |
+| GET/PUT | `/properties/{id}/schedule` | admin/agent | Per-property scheduling config |
+
+`POST /tours` body: `propertyId`, `scheduledDate` (YYYY-MM-DD), `scheduledTime`
+(HH:MM), `visitorName?`/`visitorEmail?`/`visitorPhone?` (required for guests;
+auto-filled from the account otherwise), `notes?`. Response:
+`{ id, propertyId, status, scheduledAt, confirmationCode }` (`ZENT-XXXXXX`).
+
+**Scheduling** (`property_schedules`, lazily created with defaults — Mon–Fri
+10:00–17:00, Sat 11:00–15:00, 60-min slots, capacity 1, `auto_confirm` true,
+`Africa/Lagos`, 12h min notice, 30-day window): `scheduledDate`+`scheduledTime`
+are interpreted in the property's timezone and stored as UTC. A booking is
+rejected (`409 slot_unavailable`) if the day is closed/blacked-out/out of
+window, the time isn't a slot, it's inside the notice window, or the slot is at
+capacity. `auto_confirm=false` → tours land `PENDING` and an agent confirms.
+
+**Emails** (to the visitor address, via the Module 1 sender): tour requested
+(pending), confirmed, cancelled. SMS is not wired (PRD open item §9.6).
 
 ### Sliding token refresh (PRD 6.2)
 Any authenticated response whose token is past `TOKEN_RENEW_THRESHOLD_RATIO`

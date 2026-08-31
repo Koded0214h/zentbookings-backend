@@ -133,6 +133,23 @@ def sample_property(**overrides) -> dict:
     return body
 
 
+def next_open_slot(days_ahead: int = 3, hhmm: str = "10:00") -> tuple[str, str]:
+    """A weekday date + time valid under the default schedule (Mon-Fri 10-17, >=12h notice)."""
+    from datetime import date, timedelta
+
+    d = date.today() + timedelta(days=days_ahead)
+    while d.weekday() >= 5:  # push Sat/Sun to Monday
+        d += timedelta(days=1)
+    return d.isoformat(), hhmm
+
+
+@pytest_asyncio.fixture
+async def booking_property(client, admin_auth):
+    res = await client.post("/api/properties", json=sample_property(), headers=admin_auth)
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
 @pytest_asyncio.fixture
 async def seeded_properties(session_factory):
     """Insert a deterministic mix straight into the DB for list/filter tests."""

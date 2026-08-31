@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     REGISTER_RATE_LIMIT: str = "5/60"
     FORGOT_PASSWORD_RATE_LIMIT: str = "5/300"
     LIST_RATE_LIMIT: str = "300/60"           # public catalogue reads
+    TOUR_CREATE_RATE_LIMIT: str = "5/300"     # tour bookings per IP
+    TOUR_LOOKUP_RATE_LIMIT: str = "10/300"    # guest booking lookups per IP
 
     # --- Catalogue response caching ---------------------------------------
     PROPERTIES_CACHE_MAX_AGE: int = 60        # seconds; 0 disables Cache-Control

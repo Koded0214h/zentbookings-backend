@@ -45,3 +45,67 @@ def password_reset(*, first_name: str | None, reset_url: str) -> RenderedEmail:
         html=_WRAP.format(body=body),
         text=f"Reset your Zent password: {reset_url}",
     )
+
+
+def _when(scheduled_at) -> str:
+    # scheduled_at is UTC; render simply and label it
+    return scheduled_at.strftime("%A, %d %B %Y at %H:%M UTC")
+
+
+def tour_requested(
+    *, visitor_name: str, property_title: str, scheduled_at, confirmation_code: str
+) -> RenderedEmail:
+    when = _when(scheduled_at)
+    body = (
+        f"<h2>Tour request received</h2><p>Hi {visitor_name}, we've received your request "
+        f"to tour <strong>{property_title}</strong> on <strong>{when}</strong>.</p>"
+        f"<p>Your reference is <strong>{confirmation_code}</strong>. An advisor will "
+        "confirm shortly — you'll get another email once it's locked in.</p>"
+    )
+    return RenderedEmail(
+        subject=f"Tour request received — {confirmation_code}",
+        html=_WRAP.format(body=body),
+        text=(
+            f"Hi {visitor_name}, tour request for {property_title} on {when} received. "
+            f"Reference {confirmation_code}. An advisor will confirm shortly."
+        ),
+    )
+
+
+def tour_confirmed(
+    *, visitor_name: str, property_title: str, scheduled_at, confirmation_code: str
+) -> RenderedEmail:
+    when = _when(scheduled_at)
+    body = (
+        f"<h2>Your tour is confirmed</h2><p>Hi {visitor_name}, your tour of "
+        f"<strong>{property_title}</strong> is confirmed for <strong>{when}</strong>.</p>"
+        f"<p>Show this reference on arrival: <strong>{confirmation_code}</strong>.</p>"
+    )
+    return RenderedEmail(
+        subject=f"Tour confirmed — {confirmation_code}",
+        html=_WRAP.format(body=body),
+        text=(
+            f"Hi {visitor_name}, your tour of {property_title} is confirmed for {when}. "
+            f"Reference {confirmation_code}."
+        ),
+    )
+
+
+def tour_cancelled(
+    *, visitor_name: str, property_title: str, scheduled_at, confirmation_code: str
+) -> RenderedEmail:
+    when = _when(scheduled_at)
+    body = (
+        f"<h2>Tour cancelled</h2><p>Hi {visitor_name}, your tour of "
+        f"<strong>{property_title}</strong> scheduled for <strong>{when}</strong> "
+        f"({confirmation_code}) has been cancelled.</p>"
+        "<p>You're welcome to book another time whenever suits you.</p>"
+    )
+    return RenderedEmail(
+        subject=f"Tour cancelled — {confirmation_code}",
+        html=_WRAP.format(body=body),
+        text=(
+            f"Hi {visitor_name}, your tour of {property_title} on {when} "
+            f"({confirmation_code}) has been cancelled."
+        ),
+    )

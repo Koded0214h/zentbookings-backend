@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -14,7 +15,8 @@ from app.schemas.property import (
     PropertyOut,
     PropertyUpdate,
 )
-from app.services import property_service
+from app.schemas.tour import AvailabilityResponse, ScheduleOut, ScheduleUpdate, SlotOut
+from app.services import property_service, scheduling
 from app.services.property_service import PropertyFilters
 
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -81,6 +83,60 @@ async def get_property(request: Request, db: DbSession, property_id: int) -> Res
     row = await property_service.get_property(db, property_id)
     body = PropertyOut.model_validate(row).model_dump_json(by_alias=True)
     return _conditional(request, body)
+
+
+@router.get(
+    "/{property_id}/availability",
+    response_model=AvailabilityResponse,
+    dependencies=_read_limit,
+)
+async def property_availability(
+    property_id: int,
+    db: DbSession,
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+    on: Annotated[date | None, Query(description="single date shortcut")] = None,
+) -> AvailabilityResponse:
+    await property_service.get_property(db, property_id)  # 404 if missing
+    schedule = await scheduling.get_or_create_schedule(db, property_id)
+    await db.commit()
+    if on is not None:
+        date_from = date_to = on
+    slots = await scheduling.availability(
+        db, schedule, from_date=date_from, to_date=date_to
+    )
+    return AvailabilityResponse(
+        property_id=property_id,
+        timezone=schedule.timezone,
+        slots=[
+            SlotOut(date=s.date, time=s.time, available=s.available, capacity=s.capacity)
+            for s in slots
+        ],
+    )
+
+
+@router.get(
+    "/{property_id}/schedule", response_model=ScheduleOut, dependencies=_staff_only
+)
+async def get_schedule(property_id: int, db: DbSession) -> ScheduleOut:
+    await property_service.get_property(db, property_id)
+    schedule = await scheduling.get_or_create_schedule(db, property_id)
+    await db.commit()
+    return ScheduleOut.model_validate(schedule)
+
+
+@router.put(
+    "/{property_id}/schedule", response_model=ScheduleOut, dependencies=_staff_only
+)
+async def update_schedule(
+    property_id: int, payload: ScheduleUpdate, db: DbSession
+) -> ScheduleOut:
+    await property_service.get_property(db, property_id)
+    schedule = await scheduling.get_or_create_schedule(db, property_id)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(schedule, key, value)
+    await db.commit()
+    return ScheduleOut.model_validate(schedule)
 
 
 @router.post(
