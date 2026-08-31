@@ -135,9 +135,10 @@ notification. Depends on Module 1 (auth/user) and references Module 2 (`property
   `status`, `confirmationCode`
 
 ### 3.5 Notifications
-- Tour confirmation email (template in PRD §6.3)
-- Optional SMS confirmation — provider TBD — **Open item PRD §9.6**
-- Trigger points: on create (confirm), on cancel
+- Tour emails via the Module 1 sender (template in PRD §6.3): requested
+  (pending), confirmed, cancelled
+- Trigger points: on create, on confirm, on cancel, on reschedule
+- **PRD §9.6:** email for now — SMS not implemented
 
 ---
 
@@ -305,7 +306,7 @@ re-gates endpoints that Modules 2 and 3 already expose and extends Module 1's
 | P2 | Tour booking create/list/cancel + confirmation email | 3.1, 3.2, 3.4, 3.5 |
 | P3 | OAuth, email verification, password reset | 1.3, 1.5 |
 | P3 | Property admin CRUD + media/CDN pipeline | 2.5, 2.6 |
-| P3 | Scheduling rules / slot capacity / SMS | 3.3, 3.5 |
+| P3 | Scheduling rules / slot capacity / reschedule + cancel emails | 3.3, 3.5 |
 | P4a | Role split (`require_staff`/`require_admin`) + login/presence tracking + admin user list / role / status + last-admin guard | 4.1, 4.2, 4.5 |
 | P4b | `staff_attendance` + clock in/out + own history + auto clock-out sweep | 4.4 |
 | P4c | `property_agents` + agent-scoped views + admin assignment endpoints | 4.3 |

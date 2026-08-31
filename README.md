@@ -130,7 +130,8 @@ window, the time isn't a slot, it's inside the notice window, or the slot is at
 capacity. `auto_confirm=false` → tours land `PENDING` and an agent confirms.
 
 **Emails** (to the visitor address, via the Module 1 sender): tour requested
-(pending), confirmed, cancelled. SMS is not wired (PRD open item §9.6).
+(pending), confirmed, cancelled. Email is the notification channel for now
+(PRD open item §9.6); SMS is not implemented.
 
 ## Staff, Roles & Attendance (Module 4)
 
