@@ -3,7 +3,7 @@
 > Derived from [`PRODUCT_REQUIREMENTS.md`](./PRODUCT_REQUIREMENTS.md) v1.0
 > Purpose: decompose the backend into top-level modules, each with submodules,
 > so work can be split, estimated, and owned independently.
-> Modules 1–3 are built. Module 4 (Staff, Roles & Attendance) is scoped, not built.
+> Modules 1–4 are built.
 
 ---
 
@@ -143,11 +143,11 @@ notification. Depends on Module 1 (auth/user) and references Module 2 (`property
 
 ## Module 4 — Staff, Roles & Attendance
 
-> **Status: scoped, not built.** Today there is a `role` column (`user | agent |
-> admin`) and one gate — `require_roles("admin","agent")` — so admin and agent
-> are functionally identical, role changes are CLI-only (`scripts/grant_role.py`),
-> and there is no attendance or presence tracking. This module makes the split
-> real, adds an admin surface for managing people, and tracks staff working time.
+> **Status: built.** Decisions taken: soft agent scoping (assignment is a
+> label + filter, not an authz wall); `DELETE /properties` is admin-only; staff
+> onboard via `POST /admin/agents/invite` + set-password email; lead pipeline,
+> `agent_profiles`, and `last_seen_at` all included. First admin is still
+> bootstrapped with `scripts/grant_role.py <email> admin`.
 
 Extends Module 1's `User` and auth flows; re-gates privileged endpoints across
 Modules 2 and 3; hangs an auto clock-out sweep off the Module 3 maintenance loop.

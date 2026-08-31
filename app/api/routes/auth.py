@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -88,18 +88,27 @@ async def register(
     return _auth_response(user)
 
 
+def _ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
 @router.post("/login", response_model=AuthResponse, dependencies=[_login_limit])
-async def login(payload: LoginRequest, db: DbSession) -> AuthResponse:
+async def login(payload: LoginRequest, db: DbSession, request: Request) -> AuthResponse:
     user = await auth_service.authenticate_user(db, payload.email, payload.password)
+    await auth_service.record_login(db, user, method="password", ip=_ip(request))
+    await db.commit()
     return _auth_response(user)
 
 
 @router.post("/refresh", response_model=AuthResponse)
-async def refresh(db: DbSession, user: CurrentUser, claims: TokenClaims) -> AuthResponse:
+async def refresh(
+    db: DbSession, user: CurrentUser, claims: TokenClaims, request: Request
+) -> AuthResponse:
     """Exchange a still-valid token for a fresh one; the old token is revoked."""
     await auth_service.revoke_token(
         db, claims["jti"], datetime.fromtimestamp(claims["exp"], tz=UTC)
     )
+    await auth_service.record_login(db, user, method="refresh", ip=_ip(request))
     await db.commit()
     return _auth_response(user)
 
@@ -185,6 +194,7 @@ async def google_start(
 @router.get("/google/callback")
 async def google_callback(
     db: DbSession,
+    request: Request,
     state: str = Query(...),
     code: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -199,6 +209,7 @@ async def google_callback(
     try:
         profile = await oauth.google_fetch_profile(code=code, code_verifier=flow.code_verifier)
         user = await auth_service.upsert_oauth_user(db, provider="google", **profile)
+        await auth_service.record_login(db, user, method="google", ip=_ip(request))
         await db.commit()
     except AppError:
         return RedirectResponse(
@@ -226,6 +237,7 @@ async def apple_start(
 @router.post("/apple/callback")
 async def apple_callback(
     db: DbSession,
+    request: Request,
     state: str = Form(...),
     code: str | None = Form(default=None),
     error: str | None = Form(default=None),
@@ -240,6 +252,7 @@ async def apple_callback(
     try:
         profile = await oauth.apple_fetch_profile(code=code)
         user = await auth_service.upsert_oauth_user(db, provider="apple", **profile)
+        await auth_service.record_login(db, user, method="apple", ip=_ip(request))
         await db.commit()
     except AppError:
         return RedirectResponse(

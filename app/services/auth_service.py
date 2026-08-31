@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -174,3 +174,36 @@ async def revoke_token(db: AsyncSession, jti: str, expires_at: datetime) -> None
 
 async def is_token_revoked(db: AsyncSession, jti: str) -> bool:
     return await db.get(TokenDenylist, jti) is not None
+
+
+# --- Login & presence (Module 4.5) ---------------------------------------
+async def record_login(
+    db: AsyncSession, user: User, *, method: str, ip: str | None
+) -> None:
+    now = _utcnow()
+    user.last_login_at = now
+    user.last_login_method = method
+    user.last_login_ip = ip
+    user.last_seen_at = now
+    await db.flush()
+
+
+async def touch_last_seen(db: AsyncSession, user: User) -> None:
+    """Bump last_seen_at at most once per throttle window, on the request session.
+
+    Runs in the auth dependency (before the handler), so committing here is safe
+    and independent of whether the handler itself commits.
+    """
+    last = user.last_seen_at
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        if (_utcnow() - last).total_seconds() < settings.LAST_SEEN_THROTTLE_SECONDS:
+            return
+    try:
+        now = _utcnow()
+        await db.execute(update(User).where(User.id == user.id).values(last_seen_at=now))
+        await db.commit()
+        user.last_seen_at = now
+    except Exception:  # never break a request over presence tracking
+        await db.rollback()

@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # --- Catalogue response caching ---------------------------------------
     PROPERTIES_CACHE_MAX_AGE: int = 60        # seconds; 0 disables Cache-Control
 
+    # --- Staff / attendance / audit --------------------------------------
+    ATTENDANCE_AUTO_CLOSE_HOURS: int = 16     # force-close sessions left open
+    LAST_SEEN_THROTTLE_SECONDS: int = 900     # min gap between last_seen writes
+    AUDIT_RETENTION_DAYS: int = 0             # 0 = keep audit log forever
+
     # --- Background maintenance ---------------------------------------------
     CLEANUP_ENABLED: bool = True
     CLEANUP_INTERVAL_SECONDS: int = 3600

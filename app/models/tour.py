@@ -18,6 +18,7 @@ from app.models.user import TimestampMixin, _utcnow, gen_id
 
 TOUR_STATUSES = ("PENDING", "CONFIRMED", "CANCELLED")
 ACTIVE_TOUR_STATUSES = ("PENDING", "CONFIRMED")
+LEAD_STATUSES = ("NEW", "CONTACTED", "TOURED", "NEGOTIATING", "CLOSED", "LOST")
 
 # Mon..Sun keys used by PropertySchedule.weekly_hours
 WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -79,6 +80,8 @@ class Tour(TimestampMixin, Base):
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
+    # lead pipeline (Module 4.3) — every tour is a lead
+    lead_status: Mapped[str] = mapped_column(String(20), default="NEW", nullable=False)
     confirmation_code: Mapped[str] = mapped_column(
         String(20), unique=True, index=True, nullable=False
     )

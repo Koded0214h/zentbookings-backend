@@ -47,6 +47,21 @@ def password_reset(*, first_name: str | None, reset_url: str) -> RenderedEmail:
     )
 
 
+def staff_invite(*, first_name: str | None, role: str, set_password_url: str) -> RenderedEmail:
+    name = first_name or "there"
+    body = (
+        f"<h2>You've been added to Zent</h2><p>Hi {name}, an administrator has "
+        f"created a Zent <strong>{role}</strong> account for you. Set your password "
+        f'to get started — this link expires in one hour.</p>'
+        f'<p><a href="{set_password_url}">Set my password</a></p>'
+    )
+    return RenderedEmail(
+        subject="Your Zent staff account",
+        html=_WRAP.format(body=body),
+        text=f"Hi {name}, set your Zent {role} account password: {set_password_url}",
+    )
+
+
 def _when(scheduled_at) -> str:
     # scheduled_at is UTC; render simply and label it
     return scheduled_at.strftime("%A, %d %B %Y at %H:%M UTC")

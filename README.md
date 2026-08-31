@@ -9,6 +9,10 @@ FastAPI service. See [`MODULE_BREAKDOWN.md`](./MODULE_BREAKDOWN.md) for full sco
 - **Module 3 — Tour Booking:** guest + authed bookings, per-property
   scheduling (slots/capacity/blackouts/timezone), availability lookup,
   staff management, email notifications.
+- **Module 4 — Staff, Roles & Attendance:** admin/agent role split, user &
+  role administration, agent invite emails, property↔agent assignment,
+  lead pipeline on tours, staff clock-in/out + attendance reports,
+  login/presence tracking, audit log, public "agents" directory.
 
 ## Stack
 - FastAPI + Uvicorn
@@ -127,6 +131,39 @@ capacity. `auto_confirm=false` → tours land `PENDING` and an agent confirms.
 
 **Emails** (to the visitor address, via the Module 1 sender): tour requested
 (pending), confirmed, cancelled. SMS is not wired (PRD open item §9.6).
+
+## Staff, Roles & Attendance (Module 4)
+
+Roles: `user` (default) · `agent` · `admin`. `require_staff` = agent|admin,
+`require_admin` = admin only. Bootstrap the first admin with
+`uv run python scripts/grant_role.py <email> admin`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/admin/users` | admin | list/filter (`role`, `isActive`, `q`), paginated |
+| GET/PATCH | `/admin/users/{id}` · `/role` · `/status` | admin | view / change role / (de)activate — **last-admin guarded** |
+| POST | `/admin/agents/invite` | admin | create agent/admin + email a set-password link (`/auth/reset-password` token) |
+| GET/POST/DELETE | `/admin/properties/{id}/agents[...]` | admin | list / assign / unassign agents (soft) |
+| GET | `/admin/attendance` · `/attendance/summary` | admin | all staff sessions + per-user hours |
+| PATCH | `/admin/attendance/{id}` | admin | correct a record (recomputes duration) |
+| GET | `/admin/audit` | admin | audit log (`actorId`, `action`, `targetType` filters) |
+| POST | `/staff/clock-in` · `/staff/clock-out` | staff | one open session per user (`409` otherwise) |
+| GET | `/staff/me/status` · `/staff/attendance/me` | staff | am-I-in + today total; own history |
+| GET/PUT | `/staff/me/profile` | staff | own public "Meet the Team" profile |
+| GET | `/agent/properties` · `/agent/tours` | staff | scoped to the caller's assigned properties (`leadStatus` filter) |
+| GET | `/agents` · `/agents/{id}` | – | public directory of **published** agent profiles |
+| PATCH | `/tours/{id}` | staff | reschedule (both `scheduledDate`+`scheduledTime`) and/or set `leadStatus`/`notes` |
+
+**Lead pipeline:** every tour carries `leadStatus`
+(`NEW → CONTACTED → TOURED → NEGOTIATING → CLOSED / LOST`), default `NEW`.
+
+**Login & presence:** `/auth/login`, OAuth callbacks and `/auth/refresh` stamp
+`lastLoginAt/Ip/Method`; any authed request refreshes `lastSeenAt` at most once
+per `LAST_SEEN_THROTTLE_SECONDS` (900). Visible in the admin user views only.
+
+**Auto clock-out:** the maintenance loop force-closes sessions open longer than
+`ATTENDANCE_AUTO_CLOSE_HOURS` (16, `autoClosed=true`). `AUDIT_RETENTION_DAYS`
+(0 = keep) optionally prunes the audit log.
 
 ### Sliding token refresh (PRD 6.2)
 Any authenticated response whose token is past `TOKEN_RENEW_THRESHOLD_RATIO`

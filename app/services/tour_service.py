@@ -36,6 +36,8 @@ class TourStateError(AppError):
 class TourFilters:
     status: str | None = None
     property_id: int | None = None
+    property_ids: list[int] | None = None
+    lead_status: str | None = None
 
 
 async def _unique_code(db: AsyncSession) -> str:
@@ -127,9 +129,15 @@ async def list_tours(
     if filters.status:
         stmt = stmt.where(Tour.status == filters.status.upper())
         count_stmt = count_stmt.where(Tour.status == filters.status.upper())
+    if filters.lead_status:
+        stmt = stmt.where(Tour.lead_status == filters.lead_status.upper())
+        count_stmt = count_stmt.where(Tour.lead_status == filters.lead_status.upper())
     if filters.property_id is not None:
         stmt = stmt.where(Tour.property_id == filters.property_id)
         count_stmt = count_stmt.where(Tour.property_id == filters.property_id)
+    if filters.property_ids is not None:
+        stmt = stmt.where(Tour.property_id.in_(filters.property_ids or [-1]))
+        count_stmt = count_stmt.where(Tour.property_id.in_(filters.property_ids or [-1]))
 
     total = int(await db.scalar(count_stmt) or 0)
     rows = (
@@ -158,5 +166,35 @@ async def cancel_tour(db: AsyncSession, tour: Tour) -> Tour:
     if tour.status == "CANCELLED":
         return tour
     tour.status = "CANCELLED"
+    await db.flush()
+    return tour
+
+
+async def patch_tour(
+    db: AsyncSession,
+    tour: Tour,
+    *,
+    lead_status: str | None = None,
+    notes: str | None = None,
+    scheduled_date=None,
+    scheduled_time=None,
+) -> Tour:
+    """Staff edit: lead pipeline, notes, and/or reschedule (re-validates the slot)."""
+    from app.models.tour import LEAD_STATUSES
+
+    if lead_status is not None:
+        if lead_status.upper() not in LEAD_STATUSES:
+            raise AppError(422, "validation_error", f"leadStatus must be one of {LEAD_STATUSES}")
+        tour.lead_status = lead_status.upper()
+    if notes is not None:
+        tour.notes = notes
+    if scheduled_date is not None or scheduled_time is not None:
+        if tour.status == "CANCELLED":
+            raise TourStateError("A cancelled tour cannot be rescheduled.")
+        schedule = await scheduling.get_or_create_schedule(db, tour.property_id)
+        new_dt = await scheduling.resolve_and_validate_slot(
+            db, schedule, d=scheduled_date, t=scheduled_time
+        )
+        tour.scheduled_at = new_dt
     await db.flush()
     return tour

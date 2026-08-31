@@ -111,6 +111,34 @@ async def admin_auth(client, session_factory):
     return {"Authorization": f"Bearer {token}"}
 
 
+async def _register(client, email: str, first="T", last="U"):
+    res = await client.post(
+        "/api/auth/register",
+        json={"firstName": first, "lastName": last, "email": email, "password": "SecurePass123"},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+async def _set_role(session_factory, email: str, role: str) -> str:
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    async with session_factory() as db:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        user.role = role
+        await db.commit()
+        return user.id
+
+
+@pytest_asyncio.fixture
+async def agent_auth(client, session_factory):
+    body = await _register(client, "agent@example.com", "Ada", "Agent")
+    agent_id = await _set_role(session_factory, "agent@example.com", "agent")
+    return {"headers": {"Authorization": f"Bearer {body['token']}"}, "id": agent_id}
+
+
 def sample_property(**overrides) -> dict:
     body = {
         "title": "The Obsidian Loft",

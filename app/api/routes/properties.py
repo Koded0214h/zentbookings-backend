@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import AdminUser, DbSession, require_roles
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
 from app.schemas.property import (
@@ -16,7 +16,7 @@ from app.schemas.property import (
     PropertyUpdate,
 )
 from app.schemas.tour import AvailabilityResponse, ScheduleOut, ScheduleUpdate, SlotOut
-from app.services import property_service, scheduling
+from app.services import audit, property_service, scheduling
 from app.services.property_service import PropertyFilters
 
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -160,9 +160,13 @@ async def update_property(
     return PropertyOut.model_validate(row)
 
 
-@router.delete(
-    "/{property_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_staff_only
-)
-async def delete_property(property_id: int, db: DbSession) -> None:
+@router.delete("/{property_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_property(
+    property_id: int, db: DbSession, admin: AdminUser, request: Request
+) -> None:
     await property_service.delete_property(db, property_id)
+    await audit.record(
+        db, actor_id=admin.id, action="property.delete", target_type="property",
+        target_id=property_id, ip=request.client.host if request.client else None,
+    )
     await db.commit()

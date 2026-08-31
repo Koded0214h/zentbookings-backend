@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.property import Property
+from app.models.staff import AuditLog
 from app.models.user import EmailVerificationToken, OAuthState, PasswordResetToken, TokenDenylist
-from app.services import media
+from app.services import attendance_service, media
 
 logger = logging.getLogger("zent.maintenance")
 
@@ -83,10 +84,25 @@ async def sweep_orphan_media(db: AsyncSession, *, now: datetime | None = None) -
     return removed
 
 
+async def prune_audit(db: AsyncSession, *, now: datetime | None = None) -> int:
+    if settings.AUDIT_RETENTION_DAYS <= 0:
+        return 0
+    now = now or datetime.now(UTC)
+    cutoff = now - timedelta(days=settings.AUDIT_RETENTION_DAYS)
+    result = await db.execute(delete(AuditLog).where(AuditLog.created_at < cutoff))
+    await db.commit()
+    return result.rowcount or 0
+
+
 async def run_cleanup_once() -> dict[str, int]:
     """One maintenance pass using the app's own engine. Usable from a cron/CLI."""
     async with SessionLocal() as db:
         counts = await purge_expired(db)
+        counts["stale_attendance"] = await attendance_service.close_stale(
+            db, older_than_hours=settings.ATTENDANCE_AUTO_CLOSE_HOURS
+        )
+        await db.commit()
+        counts["pruned_audit"] = await prune_audit(db)
         try:
             counts["orphan_media"] = await sweep_orphan_media(db)
         except Exception:

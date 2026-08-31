@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser, require_roles
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.ratelimit import rate_limit
 from app.models.property import Property
 from app.models.tour import Tour
@@ -16,8 +17,9 @@ from app.schemas.tour import (
     TourCreateResponse,
     TourListResponse,
     TourOut,
+    TourPatch,
 )
-from app.services import tour_service
+from app.services import audit, tour_service
 from app.services.email import EmailSender, get_email_sender
 from app.services.notifications import notify_tour
 from app.services.tour_service import TourFilters, TourForbidden
@@ -137,12 +139,22 @@ async def get_tour(tour_id: str, db: DbSession, user: CurrentUser) -> TourOut:
 
 @router.delete("/{tour_id}", response_model=TourOut)
 async def cancel_tour(
-    tour_id: str, db: DbSession, user: CurrentUser, background: BackgroundTasks, sender: SenderDep
+    tour_id: str,
+    db: DbSession,
+    user: CurrentUser,
+    background: BackgroundTasks,
+    sender: SenderDep,
+    request: Request,
 ) -> TourOut:
     tour = await tour_service.get_tour(db, tour_id)
     if not _is_staff(user) and tour.user_id != user.id:
         raise TourForbidden()
     await tour_service.cancel_tour(db, tour)
+    await audit.record(
+        db, actor_id=user.id, action="tour.cancel", target_type="tour", target_id=tour_id,
+        metadata={"by": "staff" if _is_staff(user) else "owner"},
+        ip=request.client.host if request.client else None,
+    )
     await db.commit()
     await _queue_email(background, sender, tour, await _title(db, tour.property_id), "cancelled")
     return TourOut.model_validate(tour)
@@ -152,12 +164,53 @@ async def cancel_tour(
 async def confirm_tour(
     tour_id: str,
     db: DbSession,
-    _staff_user: _staff,
+    staff_user: _staff,
     background: BackgroundTasks,
     sender: SenderDep,
+    request: Request,
 ) -> TourOut:
     tour = await tour_service.get_tour(db, tour_id)
     await tour_service.confirm_tour(db, tour)
+    await audit.record(
+        db, actor_id=staff_user.id, action="tour.confirm", target_type="tour",
+        target_id=tour_id, ip=request.client.host if request.client else None,
+    )
     await db.commit()
     await _queue_email(background, sender, tour, await _title(db, tour.property_id), "confirmed")
+    return TourOut.model_validate(tour)
+
+
+@router.patch("/{tour_id}", response_model=TourOut)
+async def patch_tour(
+    tour_id: str,
+    payload: TourPatch,
+    db: DbSession,
+    staff_user: _staff,
+    background: BackgroundTasks,
+    sender: SenderDep,
+    request: Request,
+) -> TourOut:
+    if (payload.scheduled_date is None) != (payload.scheduled_time is None):
+        raise AppError(
+            422, "validation_error", "scheduledDate and scheduledTime must be given together."
+        )
+    tour = await tour_service.get_tour(db, tour_id)
+    rescheduled = payload.scheduled_date is not None
+    await tour_service.patch_tour(
+        db, tour,
+        lead_status=payload.lead_status,
+        notes=payload.notes,
+        scheduled_date=payload.scheduled_date,
+        scheduled_time=payload.time_obj() if rescheduled else None,
+    )
+    await audit.record(
+        db, actor_id=staff_user.id, action="tour.update", target_type="tour",
+        target_id=tour_id, metadata=payload.model_dump(exclude_unset=True, mode="json"),
+        ip=request.client.host if request.client else None,
+    )
+    await db.commit()
+    if rescheduled:
+        await _queue_email(
+            background, sender, tour, await _title(db, tour.property_id), "confirmed"
+        )
     return TourOut.model_validate(tour)

@@ -9,6 +9,7 @@ from pydantic import EmailStr, Field, field_serializer, field_validator
 from app.schemas.common import CamelModel
 
 Status = Literal["PENDING", "CONFIRMED", "CANCELLED"]
+LeadStatus = Literal["NEW", "CONTACTED", "TOURED", "NEGOTIATING", "CLOSED", "LOST"]
 _HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
@@ -64,12 +65,31 @@ class TourOut(CamelModel):
     scheduled_at: datetime
     notes: str | None = None
     status: Status
+    lead_status: LeadStatus = "NEW"
     confirmation_code: str
     created_at: datetime | None = None
 
     @field_serializer("scheduled_at", "created_at", when_used="json")
     def _ser_dt(self, v: datetime | None) -> str | None:
         return _iso_z(v)
+
+
+class TourPatch(CamelModel):
+    lead_status: LeadStatus | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    scheduled_date: date | None = None
+    scheduled_time: str | None = None
+
+    @field_validator("scheduled_time")
+    @classmethod
+    def _valid_time(cls, v: str | None) -> str | None:
+        if v is not None and not _HHMM.match(v):
+            raise ValueError("scheduledTime must be HH:MM (24h)")
+        return v
+
+    def time_obj(self):
+        hh, mm = self.scheduled_time.split(":")
+        return time(int(hh), int(mm))
 
 
 class TourListResponse(CamelModel):

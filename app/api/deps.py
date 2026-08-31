@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.exceptions import AppError
 from app.core.security import create_access_token, decode_access_token
 from app.models.user import User
-from app.services.auth_service import is_token_revoked
+from app.services.auth_service import is_token_revoked, touch_last_seen
 
 _bearer = HTTPBearer(auto_error=True, description="JWT access token")
 
@@ -60,6 +60,7 @@ async def get_current_user(
         raise _Unauthorized("Account is unavailable.")
 
     _maybe_renew(response, payload)
+    await touch_last_seen(db, user)
     return user
 
 
@@ -110,3 +111,10 @@ def require_roles(*roles: str):
         return user
 
     return _guard
+
+
+require_staff = require_roles("admin", "agent")
+require_admin = require_roles("admin")
+
+StaffUser = Annotated[User, Depends(require_staff)]
+AdminUser = Annotated[User, Depends(require_admin)]
