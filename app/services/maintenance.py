@@ -12,13 +12,13 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.property import Property
 from app.models.staff import AuditLog
-from app.models.user import EmailVerificationToken, OAuthState, PasswordResetToken, TokenDenylist
+from app.models.user import EmailOtp, OAuthState, PasswordResetToken, TokenDenylist
 from app.services import attendance_service, media
 
 logger = logging.getLogger("zent.maintenance")
 
 # Tables with an `expires_at` column that are safe to prune once past it.
-_EXPIRABLE = (TokenDenylist, OAuthState, EmailVerificationToken, PasswordResetToken)
+_EXPIRABLE = (TokenDenylist, OAuthState, EmailOtp, PasswordResetToken)
 
 
 async def purge_expired(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:

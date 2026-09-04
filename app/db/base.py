@@ -10,7 +10,7 @@ from app.models.staff import (  # noqa: F401
 )
 from app.models.tour import PropertySchedule, Tour  # noqa: F401
 from app.models.user import (  # noqa: F401
-    EmailVerificationToken,
+    EmailOtp,
     OAuthAccount,
     OAuthState,
     PasswordResetToken,

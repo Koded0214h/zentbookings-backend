@@ -60,8 +60,8 @@ async def test_last_admin_guard(client, admin_auth):
     assert deactivate.status_code == 409
 
 
-async def test_deactivate_blocks_the_user(client, admin_auth):
-    body = await _register(client, "victim@example.com")
+async def test_deactivate_blocks_the_user(client, admin_auth, email_sender):
+    body = await _register(client, email_sender, "victim@example.com")
     uid = body["user"]["id"]
     vauth = {"Authorization": f"Bearer {body['token']}"}
     assert (await client.get("/api/auth/me", headers=vauth)).status_code == 200

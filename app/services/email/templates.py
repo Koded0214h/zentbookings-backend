@@ -17,17 +17,25 @@ class RenderedEmail:
     text: str
 
 
-def account_confirmation(*, first_name: str | None, verify_url: str) -> RenderedEmail:
+def email_otp(*, first_name: str | None, code: str, ttl_minutes: int) -> RenderedEmail:
     name = first_name or "there"
+    code_html = (
+        f'<p style="font:600 32px/1 ui-monospace,Menlo,Consolas,monospace;'
+        f'letter-spacing:6px;margin:20px 0">{code}</p>'
+    )
     body = (
         f"<h2>Welcome to Zent, {name}.</h2>"
-        "<p>Your account is ready. You can confirm your email address any time using "
-        f'the link below.</p><p><a href="{verify_url}">Confirm my email</a></p>'
+        f"<p>Enter this code to verify your email — it expires in {ttl_minutes} minutes.</p>"
+        f"{code_html}"
+        "<p style=\"font-size:13px;color:#888\">Didn't request this? You can ignore this email.</p>"
     )
     return RenderedEmail(
-        subject="Welcome to Zent",
+        subject=f"Your Zent verification code is {code}",
         html=_WRAP.format(body=body),
-        text=f"Welcome to Zent, {name}. Confirm your email: {verify_url}",
+        text=(
+            f"Welcome to Zent, {name}. Your verification code: {code} "
+            f"(expires in {ttl_minutes} min)."
+        ),
     )
 
 

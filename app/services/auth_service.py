@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import EmailAlreadyExists, InvalidCredentials, InvalidToken
+from app.core.exceptions import (
+    AppError,
+    EmailAlreadyExists,
+    InvalidCredentials,
+    InvalidToken,
+)
 from app.core.security import (
     generate_url_token,
     hash_password,
@@ -14,13 +20,30 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import (
-    EmailVerificationToken,
+    EmailOtp,
     OAuthAccount,
     PasswordResetToken,
     TokenDenylist,
     User,
 )
 from app.schemas.auth import RegisterRequest
+
+
+class EmailNotVerified(AppError):
+    def __init__(self) -> None:
+        super().__init__(403, "email_unverified", "Please verify your email before signing in.")
+
+
+class OtpInvalid(AppError):
+    def __init__(self) -> None:
+        super().__init__(400, "otp_invalid", "That code is incorrect or has expired.")
+
+
+class OtpLocked(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            429, "otp_locked", "Too many incorrect attempts. Request a new code."
+        )
 
 
 def _utcnow() -> datetime:
@@ -49,7 +72,7 @@ async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
         hashed_password=hash_password(data.password),
         first_name=data.first_name.strip(),
         last_name=data.last_name.strip(),
-        is_verified=True,  # auto-confirm on register (PRD open item 9.2, decision: auto)
+        is_verified=False,  # PRD open item 9.2, decision: OTP verification required
     )
     db.add(user)
     await db.flush()
@@ -64,6 +87,8 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
         raise InvalidCredentials()
     if not user.is_active:
         raise InvalidCredentials()
+    if not user.is_verified:
+        raise EmailNotVerified()
     return user
 
 
@@ -111,31 +136,61 @@ async def upsert_oauth_user(
     return user
 
 
-# --- Email verification ----------------------------------------------------
-async def issue_email_verification_token(db: AsyncSession, user: User) -> str:
-    raw, token_hash = generate_url_token()
-    db.add(
-        EmailVerificationToken(
-            token_hash=token_hash,
-            user_id=user.id,
-            expires_at=_utcnow() + timedelta(seconds=settings.EMAIL_VERIFY_TTL_SECONDS),
-        )
-    )
+# --- Email verification (OTP) -----------------------------------------------
+def _generate_otp() -> str:
+    n = settings.OTP_LENGTH
+    return f"{secrets.randbelow(10**n):0{n}d}"
+
+
+async def issue_otp(db: AsyncSession, user: User) -> str:
+    """(Re)issue the user's verification code, replacing any existing one."""
+    raw = _generate_otp()
+    row = await db.get(EmailOtp, user.id)
+    expires_at = _utcnow() + timedelta(seconds=settings.OTP_TTL_SECONDS)
+    if row is None:
+        db.add(EmailOtp(user_id=user.id, code_hash=hash_url_token(raw), expires_at=expires_at))
+    else:
+        row.code_hash = hash_url_token(raw)
+        row.expires_at = expires_at
+        row.attempts = 0
     await db.flush()
     return raw
 
 
-async def confirm_email_verification(db: AsyncSession, raw_token: str) -> User:
-    row = await db.get(EmailVerificationToken, hash_url_token(raw_token))
-    if row is None or row.used_at is not None or _aware(row.expires_at) < _utcnow():
-        raise InvalidToken()
-    user = await db.get(User, row.user_id)
+async def verify_otp(db: AsyncSession, email: str, code: str) -> User:
+    user = await get_user_by_email(db, email)
     if user is None:
-        raise InvalidToken()
+        raise OtpInvalid()
+    if user.is_verified:
+        return user  # idempotent: already done, nothing to check
+
+    row = await db.get(EmailOtp, user.id)
+    if row is None:
+        raise OtpInvalid()
+    if row.attempts >= settings.OTP_MAX_ATTEMPTS:
+        raise OtpLocked()
+    if _aware(row.expires_at) < _utcnow():
+        raise OtpInvalid()
+    if row.code_hash != hash_url_token(code.strip()):
+        row.attempts += 1
+        # commit now: the route's own commit never runs once this raises, and the
+        # get_db dependency rolls back on exception, so this would otherwise be lost
+        await db.commit()
+        raise OtpInvalid()
+
     user.is_verified = True
-    row.used_at = _utcnow()
+    await db.delete(row)
     await db.flush()
     return user
+
+
+async def resend_otp(db: AsyncSession, email: str) -> tuple[User, str] | None:
+    """None when there's nothing to do (unknown email, or already verified) —
+    the route always replies the same way either way, to avoid leaking which."""
+    user = await get_user_by_email(db, email)
+    if user is None or user.is_verified:
+        return None
+    return user, await issue_otp(db, user)
 
 
 # --- Password reset --------------------------------------------------------

@@ -75,8 +75,14 @@ class Settings(BaseSettings):
 
     # --- Token TTLs (seconds) ---------------------------------------------------
     OAUTH_STATE_TTL_SECONDS: int = 600
-    EMAIL_VERIFY_TTL_SECONDS: int = 60 * 60 * 24  # 24h
     PASSWORD_RESET_TTL_SECONDS: int = 60 * 60  # 1h
+
+    # --- Email verification (OTP) -----------------------------------------
+    OTP_LENGTH: int = 6
+    OTP_TTL_SECONDS: int = 60 * 10  # 10 minutes
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_RESEND_RATE_LIMIT: str = "3/300"  # per client IP
+    OTP_VERIFY_RATE_LIMIT: str = "10/300"  # per client IP
 
     # --- Google OAuth ------------------------------------------------------------
     GOOGLE_CLIENT_ID: str | None = None

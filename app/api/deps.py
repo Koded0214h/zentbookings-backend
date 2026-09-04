@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.exceptions import AppError
 from app.core.security import create_access_token, decode_access_token
 from app.models.user import User
-from app.services.auth_service import is_token_revoked, touch_last_seen
+from app.services.auth_service import EmailNotVerified, is_token_revoked, touch_last_seen
 
 _bearer = HTTPBearer(auto_error=True, description="JWT access token")
 
@@ -58,6 +58,10 @@ async def get_current_user(
     user = await db.get(User, sub)
     if user is None or not user.is_active:
         raise _Unauthorized("Account is unavailable.")
+    if not user.is_verified:
+        # belt-and-braces: no normal path issues a token before verify-otp,
+        # but a future admin action could flip is_verified back off
+        raise EmailNotVerified()
 
     _maybe_renew(response, payload)
     await touch_last_seen(db, user)

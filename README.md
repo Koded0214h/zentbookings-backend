@@ -3,7 +3,8 @@
 FastAPI service. See [`MODULE_BREAKDOWN.md`](./MODULE_BREAKDOWN.md) for full scope.
 
 - **Module 1 — Identity & Access:** registration, login, sessions, OAuth
-  (Google live; Apple coded, deferred), profile, email verification, password reset.
+  (Google live; Apple coded, deferred), profile, OTP email verification,
+  password reset.
 - **Module 2 — Property Catalogue:** listing + pagination, search/filter,
   detail, role-gated admin CRUD.
 - **Module 3 — Tour Booking:** guest + authed bookings, per-property
@@ -45,12 +46,13 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 ## Endpoints (prefix `/api`)
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/auth/register` | – | Create user, returns `{ token, user }` (auto-confirmed). Rate limited. |
-| POST | `/auth/login` | – | `{ token, user }`. Rate limited. |
+| POST | `/auth/register` | – | Creates an **unverified** user, emails a 6-digit code, returns `{ message, email, expiresInSeconds }` — **no token yet**. Rate limited. |
+| POST | `/auth/verify-otp` | – | `{ email, code }` → `{ token, user }` on success. Rate limited; locks after `OTP_MAX_ATTEMPTS`. |
+| POST | `/auth/resend-otp` | – | `{ email }` → always 202; issues a fresh code (old one invalidated) if the account exists and isn't verified yet. Rate limited. |
+| POST | `/auth/login` | – | `{ token, user }`. `403 email_unverified` if not yet verified. Rate limited. |
 | POST | `/auth/refresh` | Bearer | Swap a valid token for a fresh one; old token revoked (PRD 6.2) |
 | POST | `/auth/logout` | Bearer | Revoke current token (JWT denylist) |
 | GET | `/auth/me` | Bearer | Current user profile |
-| GET | `/auth/verify-email?token=` | – | Confirm email (non-blocking) |
 | POST | `/auth/forgot-password` | – | Always 202; emails reset link if account exists. Rate limited. |
 | POST | `/auth/reset-password` | – | `{ token, password }`, single-use token |
 | GET | `/auth/google?redirect_uri=` | – | Start Google OAuth (PKCE) |
@@ -59,6 +61,19 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | GET | `/dev/oauth-landing` | – | Local-only stand-in for the frontend OAuth landing (hidden when `PROD=true`) |
 
 Errors use `{ "error": { "code", "message" } }`; validation errors add `fields[]`.
+
+### Email verification (OTP)
+Registration no longer auto-confirms (PRD open item §9.2, decision: OTP
+required). Flow: `POST /auth/register` → user created `isVerified=false`,
+6-digit code emailed (`OTP_TTL_SECONDS`, default 10 min) → `POST
+/auth/verify-otp` checks it and returns the first real `{ token, user }`.
+Wrong codes count against `OTP_MAX_ATTEMPTS` (5) before locking out ( `429
+otp_locked`) until `POST /auth/resend-otp` issues a fresh one. `login` and
+every `Bearer`-protected endpoint reject an unverified account with `403
+email_unverified`. OAuth sign-ups and admin-invited staff are exempt — their
+email is already provider/admin-verified. Existing accounts from before this
+change keep whatever `isVerified` value they had; nobody is retroactively
+locked out.
 
 ## Properties (Module 2)
 | Method | Path | Auth | Purpose |

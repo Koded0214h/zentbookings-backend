@@ -20,8 +20,11 @@ from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
     RegisterRequest,
+    RegisterResponse,
+    ResendOtpRequest,
     ResetPasswordRequest,
     UserOut,
+    VerifyOtpRequest,
 )
 from app.services import auth_service, oauth
 from app.services.email import EmailSender, get_email_sender
@@ -35,6 +38,8 @@ SenderDep = Annotated[EmailSender, Depends(get_email_sender)]
 _login_limit = Depends(rate_limit("login", settings.LOGIN_RATE_LIMIT))
 _register_limit = Depends(rate_limit("register", settings.REGISTER_RATE_LIMIT))
 _forgot_limit = Depends(rate_limit("forgot_password", settings.FORGOT_PASSWORD_RATE_LIMIT))
+_otp_verify_limit = Depends(rate_limit("otp_verify", settings.OTP_VERIFY_RATE_LIMIT))
+_otp_resend_limit = Depends(rate_limit("otp_resend", settings.OTP_RESEND_RATE_LIMIT))
 
 
 def _auth_response(user: User) -> AuthResponse:
@@ -50,12 +55,6 @@ async def _send(sender: EmailSender, to: str, rendered: tmpl.RenderedEmail) -> N
         pass
 
 
-def _verify_url(raw_token: str) -> str:
-    return oauth.append_query(
-        f"{settings.FRONTEND_BASE_URL}/verify-email", token=raw_token
-    )
-
-
 def _reset_url(raw_token: str) -> str:
     return oauth.append_query(
         f"{settings.FRONTEND_BASE_URL}/reset-password", token=raw_token
@@ -65,7 +64,7 @@ def _reset_url(raw_token: str) -> str:
 # --- Email / password ------------------------------------------------------
 @router.post(
     "/register",
-    response_model=AuthResponse,
+    response_model=RegisterResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[_register_limit],
 )
@@ -74,22 +73,72 @@ async def register(
     db: DbSession,
     background: BackgroundTasks,
     sender: SenderDep,
-) -> AuthResponse:
+) -> RegisterResponse:
+    """Creates the account unverified and emails a 6-digit code.
+
+    No session token yet — sign-in is blocked until POST /auth/verify-otp.
+    """
     user = await auth_service.register_user(db, payload)
-    raw_token = await auth_service.issue_email_verification_token(db, user)
+    raw_otp = await auth_service.issue_otp(db, user)
     await db.commit()
 
     background.add_task(
         _send,
         sender,
         user.email,
-        tmpl.account_confirmation(first_name=user.first_name, verify_url=_verify_url(raw_token)),
+        tmpl.email_otp(
+            first_name=user.first_name,
+            code=raw_otp,
+            ttl_minutes=settings.OTP_TTL_SECONDS // 60,
+        ),
     )
-    return _auth_response(user)
+    return RegisterResponse(
+        message="Account created. Check your email for a verification code.",
+        email=user.email,
+        expires_in_seconds=settings.OTP_TTL_SECONDS,
+    )
 
 
 def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+@router.post("/verify-otp", response_model=AuthResponse, dependencies=[_otp_verify_limit])
+async def verify_otp(
+    payload: VerifyOtpRequest, db: DbSession, request: Request
+) -> AuthResponse:
+    user = await auth_service.verify_otp(db, payload.email, payload.code)
+    await auth_service.record_login(db, user, method="password", ip=_ip(request))
+    await db.commit()
+    return _auth_response(user)
+
+
+@router.post(
+    "/resend-otp",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[_otp_resend_limit],
+)
+async def resend_otp(
+    payload: ResendOtpRequest, db: DbSession, background: BackgroundTasks, sender: SenderDep
+) -> MessageResponse:
+    result = await auth_service.resend_otp(db, payload.email)
+    if result:
+        user, raw_otp = result
+        await db.commit()
+        background.add_task(
+            _send,
+            sender,
+            user.email,
+            tmpl.email_otp(
+                first_name=user.first_name,
+                code=raw_otp,
+                ttl_minutes=settings.OTP_TTL_SECONDS // 60,
+            ),
+        )
+    return MessageResponse(
+        message="If that account needs verifying, a new code is on its way."
+    )
 
 
 @router.post("/login", response_model=AuthResponse, dependencies=[_login_limit])
@@ -133,13 +182,6 @@ async def logout(
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
-
-
-@router.get("/verify-email", response_model=MessageResponse)
-async def verify_email(db: DbSession, token: str = Query(min_length=1)) -> MessageResponse:
-    await auth_service.confirm_email_verification(db, token)
-    await db.commit()
-    return MessageResponse(message="Email confirmed.")
 
 
 @router.post(

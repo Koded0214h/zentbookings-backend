@@ -76,7 +76,7 @@ async def main() -> int:
             return 1
 
         # ---------------- Module 1: Identity & Access ----------------
-        head("M1 · register")
+        head("M1 · register (creates an unverified user, emails a 6-digit code)")
         body = show(
             "POST", "/api/auth/register",
             await c.post(
@@ -85,20 +85,26 @@ async def main() -> int:
                       "email": email, "password": password},
             ),
         )
-        token = body.get("token")
+        if "token" in body:
+            print(f"{C_ERR}unexpected: register returned a token{C_END}")
+            return 1
+
+        head("verify (dev shortcut: flips is_verified in the DB instead of reading "
+             "the code from the console-logged email — POST /auth/verify-otp is what "
+             "the frontend actually calls)")
+        await _force_verify(email)
+
+        head("M1 · login")
+        token = show(
+            "POST", "/api/auth/login",
+            await c.post(f"{API}/auth/login", json={"email": email, "password": password}),
+        ).get("token")
         if not token:
             return 1
         auth = {"Authorization": f"Bearer {token}"}
 
         head("M1 · me")
         show("GET", "/api/auth/me", await c.get(f"{API}/auth/me", headers=auth))
-
-        head("M1 · login")
-        token = show(
-            "POST", "/api/auth/login",
-            await c.post(f"{API}/auth/login", json={"email": email, "password": password}),
-        ).get("token", token)
-        auth = {"Authorization": f"Bearer {token}"}
 
         head("M1 · refresh (old token is revoked)")
         token = show("POST", "/api/auth/refresh",
@@ -229,6 +235,19 @@ async def main() -> int:
     print(f"  Lands : {C_OK}{landing}{C_END}")
     print(f"{C_DIM}  Needs GOOGLE_CLIENT_ID/SECRET and the callback URL registered in GCP.{C_END}")
     return 0
+
+
+async def _force_verify(email: str) -> None:
+    """Dev-only shortcut: flip is_verified directly, skipping the OTP email."""
+    from sqlalchemy import text
+
+    from app.core.database import engine
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE users SET is_verified = true WHERE email = :e"), {"e": email}
+        )
+    await engine.dispose()
 
 
 async def _delete_user(email: str) -> None:

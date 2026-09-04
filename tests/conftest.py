@@ -76,51 +76,60 @@ async def client(session_factory, email_sender):
     app.dependency_overrides.clear()
 
 
+def _extract_otp(email_sender, to: str) -> str:
+    import re
+
+    for sent in reversed(email_sender.sent):
+        if sent["to"] == to:
+            match = re.search(r"\b(\d{6})\b", sent["text"] or sent["html"])
+            if match:
+                return match.group(1)
+    raise AssertionError(f"no OTP email found for {to}")
+
+
+async def _register(client, email_sender, email: str, first="T", last="U") -> dict:
+    """Register + verify-otp, returning the final {token, user} body."""
+    res = await client.post(
+        "/api/auth/register",
+        json={"firstName": first, "lastName": last, "email": email, "password": "SecurePass123"},
+    )
+    assert res.status_code == 201, res.text
+    assert "token" not in res.json()  # unverified: no session yet
+
+    code = _extract_otp(email_sender, email)
+    verified = await client.post("/api/auth/verify-otp", json={"email": email, "code": code})
+    assert verified.status_code == 200, verified.text
+    return verified.json()
+
+
 @pytest_asyncio.fixture
-async def registered_user(client):
+async def registered_user(client, email_sender):
     payload = {
         "firstName": "Amara",
         "lastName": "Adeyemi",
         "email": "amara@example.com",
         "password": "SecurePass123",
     }
-    res = await client.post("/api/auth/register", json=payload)
-    assert res.status_code == 201, res.text
-    return {"payload": payload, "body": res.json()}
+    body = await _register(
+        client, email_sender, payload["email"], payload["firstName"], payload["lastName"]
+    )
+    return {"payload": payload, "body": body}
 
 
 @pytest_asyncio.fixture
-async def admin_auth(client, session_factory):
+async def admin_auth(client, email_sender, session_factory):
     from sqlalchemy import select
 
     from app.models.user import User
 
-    res = await client.post(
-        "/api/auth/register",
-        json={
-            "firstName": "Admin",
-            "lastName": "User",
-            "email": "admin@example.com",
-            "password": "SecurePass123",
-        },
-    )
-    token = res.json()["token"]
+    body = await _register(client, email_sender, "admin@example.com", "Admin", "User")
     async with session_factory() as db:
         user = (
             await db.execute(select(User).where(User.email == "admin@example.com"))
         ).scalar_one()
         user.role = "admin"
         await db.commit()
-    return {"Authorization": f"Bearer {token}"}
-
-
-async def _register(client, email: str, first="T", last="U"):
-    res = await client.post(
-        "/api/auth/register",
-        json={"firstName": first, "lastName": last, "email": email, "password": "SecurePass123"},
-    )
-    assert res.status_code == 201, res.text
-    return res.json()
+    return {"Authorization": f"Bearer {body['token']}"}
 
 
 async def _set_role(session_factory, email: str, role: str) -> str:
@@ -136,8 +145,8 @@ async def _set_role(session_factory, email: str, role: str) -> str:
 
 
 @pytest_asyncio.fixture
-async def agent_auth(client, session_factory):
-    body = await _register(client, "agent@example.com", "Ada", "Agent")
+async def agent_auth(client, email_sender, session_factory):
+    body = await _register(client, email_sender, "agent@example.com", "Ada", "Agent")
     agent_id = await _set_role(session_factory, "agent@example.com", "agent")
     return {"headers": {"Authorization": f"Bearer {body['token']}"}, "id": agent_id}
 

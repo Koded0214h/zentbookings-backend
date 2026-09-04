@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from conftest import next_open_slot
+from conftest import _register, next_open_slot
 
 
 def _booking(property_id: int, **over) -> dict:
@@ -161,7 +161,9 @@ async def test_list_is_self_scoped_but_staff_sees_all(
     assert filtered["total"] == 2
 
 
-async def test_detail_ownership(client, booking_property, registered_user, admin_auth):
+async def test_detail_ownership(
+    client, booking_property, registered_user, admin_auth, email_sender
+):
     token = registered_user["body"]["token"]
     made = await client.post(
         "/api/tours",
@@ -170,17 +172,9 @@ async def test_detail_ownership(client, booking_property, registered_user, admin
     )
     tid = made.json()["id"]
 
-    other = await client.post(
-        "/api/auth/register",
-        json={
-            "firstName": "N",
-            "lastName": "O",
-            "email": "no@example.com",
-            "password": "SecurePass123",
-        },
-    )
+    other = await _register(client, email_sender, "no@example.com", "N", "O")
     owner = {"Authorization": f"Bearer {token}"}
-    stranger = {"Authorization": f"Bearer {other.json()['token']}"}
+    stranger = {"Authorization": f"Bearer {other['token']}"}
 
     assert (await client.get(f"/api/tours/{tid}", headers=owner)).status_code == 200
     assert (await client.get(f"/api/tours/{tid}", headers=stranger)).status_code == 403

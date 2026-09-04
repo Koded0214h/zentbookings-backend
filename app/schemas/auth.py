@@ -46,6 +46,15 @@ class ResetPasswordRequest(CamelModel):
     _pw = field_validator("password")(validate_password_strength)
 
 
+class VerifyOtpRequest(CamelModel):
+    email: EmailStr
+    code: str = Field(min_length=1, max_length=12)
+
+
+class ResendOtpRequest(CamelModel):
+    email: EmailStr
+
+
 # --- Responses -------------------------------------------------------------
 class UserOut(CamelModel):
     id: str
@@ -54,6 +63,7 @@ class UserOut(CamelModel):
     last_name: str | None = None
     full_name: str | None = None
     avatar_url: str | None = None
+    is_verified: bool = False
     created_at: datetime | None = None
 
     @field_serializer("created_at", when_used="json")
@@ -68,6 +78,14 @@ class UserOut(CamelModel):
 class AuthResponse(CamelModel):
     token: str
     user: UserOut
+
+
+class RegisterResponse(CamelModel):
+    """No token yet — the account is created but unverified until /auth/verify-otp."""
+
+    message: str
+    email: EmailStr
+    expires_in_seconds: int
 
 
 class MessageResponse(CamelModel):
