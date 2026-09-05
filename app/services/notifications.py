@@ -8,6 +8,7 @@ from app.services.email.base import EmailSender
 _TOUR_TEMPLATES = {
     "requested": tmpl.tour_requested,
     "confirmed": tmpl.tour_confirmed,
+    "rescheduled": tmpl.tour_rescheduled,
     "cancelled": tmpl.tour_cancelled,
 }
 

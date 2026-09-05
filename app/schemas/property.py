@@ -29,6 +29,9 @@ class PropertyBase(CamelModel):
 
 
 class PropertyCreate(PropertyBase):
+    # Free string (e.g. Monthly / Yearly / Nightly / Weekly). Derived from
+    # `period` when omitted.
+    type: str | None = Field(default=None, max_length=20)
     # Optional Cloudinary public ids (from POST /media/upload). Stored, not echoed;
     # used to delete the assets when the property is removed.
     image_public_id: str | None = Field(default=None, max_length=255)
@@ -53,12 +56,15 @@ class PropertyUpdate(CamelModel):
     full_description: str | None = Field(default=None, min_length=1)
     dot_color: str | None = Field(default=None, min_length=1, max_length=20)
     category: Category | None = None
+    type: str | None = Field(default=None, max_length=20)
     image_public_id: str | None = Field(default=None, max_length=255)
     gallery_public_ids: list[str] | None = None
 
 
 class PropertyOut(PropertyBase):
     id: int
+    type: str
+    created_by_id: str | None = None
 
 
 class PropertyListResponse(CamelModel):

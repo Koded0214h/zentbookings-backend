@@ -89,7 +89,9 @@ async def test_agent_profile_and_public_listing(client, admin_auth, agent_auth):
     assert one.json()["title"] == "Senior Advisor"
 
 
-async def test_patch_tour_lead_status_and_reschedule(client, admin_auth, agent_auth):
+async def test_patch_tour_lead_status_and_reschedule(
+    client, admin_auth, agent_auth, email_sender
+):
     pid = await _make_property(client, admin_auth)
     d, t = next_open_slot(days_ahead=4)
     made = await client.post(
@@ -108,7 +110,7 @@ async def test_patch_tour_lead_status_and_reschedule(client, admin_auth, agent_a
     assert lead.status_code == 200
     assert lead.json()["leadStatus"] == "NEGOTIATING"
 
-    # reschedule to a different slot same day
+    # reschedule to a different slot same day -> dedicated "rescheduled" email
     other = "14:00" if t != "14:00" else "15:00"
     resc = await client.patch(
         f"/api/tours/{tid}",
@@ -116,10 +118,30 @@ async def test_patch_tour_lead_status_and_reschedule(client, admin_auth, agent_a
         headers=h,
     )
     assert resc.status_code == 200
+    assert "rescheduled" in email_sender.sent[-1]["subject"].lower()
 
     # one field of a reschedule pair -> 422
     bad = await client.patch(f"/api/tours/{tid}", json={"scheduledTime": "16:00"}, headers=h)
     assert bad.status_code == 422
+
+
+async def test_admin_can_edit_another_agents_profile(client, admin_auth, agent_auth):
+    res = await client.put(
+        f"/api/admin/users/{agent_auth['id']}/profile",
+        json={"title": "Lead Advisor", "published": True},
+        headers=admin_auth,
+    )
+    assert res.status_code == 200
+    assert res.json()["title"] == "Lead Advisor"
+
+    got = await client.get(
+        f"/api/admin/users/{agent_auth['id']}/profile", headers=admin_auth
+    )
+    assert got.json()["title"] == "Lead Advisor"
+
+    # and it shows on the public directory
+    pub = await client.get("/api/agents")
+    assert agent_auth["id"] in {a["id"] for a in pub.json()["agents"]}
 
 
 async def test_non_staff_cannot_patch_tour(client, admin_auth, registered_user):

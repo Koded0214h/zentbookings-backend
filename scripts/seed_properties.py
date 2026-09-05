@@ -56,6 +56,7 @@ def _full_description(title: str, location: str, beds: int) -> str:
 def _make(i: int) -> Property:
     category = "Rent" if i % 3 else "Shortlet"
     period = "Per Month" if category == "Rent" else "Per Night"
+    ptype = random.choice(["Monthly", "Yearly"] if category == "Rent" else ["Nightly", "Weekly"])
     beds = random.randint(1, 5)
     baths = beds + random.randint(0, 1)
     title = f"The {random.choice(ADJ)} {random.choice(NOUN)}"
@@ -74,6 +75,7 @@ def _make(i: int) -> Property:
         sqft=random.randrange(800, 5200, 100),
         price=price,
         period=period,
+        type=ptype,
         year_built=random.randint(2015, 2024),
         amenities=random.sample(AMENITIES, k=random.randint(4, 8)),
         description=random.choice(DESCRIPTIONS),

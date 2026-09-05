@@ -211,6 +211,6 @@ async def patch_tour(
     await db.commit()
     if rescheduled:
         await _queue_email(
-            background, sender, tour, await _title(db, tour.property_id), "confirmed"
+            background, sender, tour, await _title(db, tour.property_id), "rescheduled"
         )
     return TourOut.model_validate(tour)

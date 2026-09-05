@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 
-from app.api.deps import AdminUser, DbSession, require_roles
+from app.api.deps import AdminUser, DbSession, StaffUser, require_roles
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
 from app.schemas.property import (
@@ -53,6 +53,9 @@ async def list_properties(
     location: Annotated[str | None, Query()] = None,
     type: Annotated[str | None, Query()] = None,  # noqa: A002 - matches PRD param name
     q: Annotated[str | None, Query(description="free-text over title/location/description")] = None,
+    amenities: Annotated[
+        str | None, Query(description="comma-separated; matches properties having all of them")
+    ] = None,
     sort: SortParam = "id",
     price_min: Annotated[int | None, Query(alias="priceMin", ge=0)] = None,
     price_max: Annotated[int | None, Query(alias="priceMax", ge=0)] = None,
@@ -64,6 +67,7 @@ async def list_properties(
         price_min=price_min,
         price_max=price_max,
         q=q,
+        amenities=[a for a in (amenities or "").split(",") if a.strip()],
     )
     rows, total, total_pages = await property_service.list_properties(
         db, filters=filters, page=page, limit=limit, sort=sort
@@ -139,14 +143,11 @@ async def update_schedule(
     return ScheduleOut.model_validate(schedule)
 
 
-@router.post(
-    "",
-    response_model=PropertyOut,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=_staff_only,
-)
-async def create_property(payload: PropertyCreate, db: DbSession) -> PropertyOut:
-    row = await property_service.create_property(db, payload)
+@router.post("", response_model=PropertyOut, status_code=status.HTTP_201_CREATED)
+async def create_property(
+    payload: PropertyCreate, db: DbSession, user: StaffUser
+) -> PropertyOut:
+    row = await property_service.create_property(db, payload, actor_id=user.id)
     await db.commit()
     return PropertyOut.model_validate(row)
 
@@ -162,11 +163,32 @@ async def update_property(
 
 @router.delete("/{property_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_property(
-    property_id: int, db: DbSession, admin: AdminUser, request: Request
+    property_id: int,
+    db: DbSession,
+    admin: AdminUser,
+    request: Request,
+    purge: Annotated[
+        bool, Query(description="hard-delete + destroy media instead of soft")
+    ] = False,
 ) -> None:
-    await property_service.delete_property(db, property_id)
+    await property_service.delete_property(db, property_id, purge=purge)
     await audit.record(
-        db, actor_id=admin.id, action="property.delete", target_type="property",
+        db, actor_id=admin.id,
+        action="property.purge" if purge else "property.delete",
+        target_type="property", target_id=property_id,
+        ip=request.client.host if request.client else None,
+    )
+    await db.commit()
+
+
+@router.post("/{property_id}/restore", response_model=PropertyOut)
+async def restore_property(
+    property_id: int, db: DbSession, admin: AdminUser, request: Request
+) -> PropertyOut:
+    row = await property_service.restore_property(db, property_id)
+    await audit.record(
+        db, actor_id=admin.id, action="property.restore", target_type="property",
         target_id=property_id, ip=request.client.host if request.client else None,
     )
     await db.commit()
+    return PropertyOut.model_validate(row)

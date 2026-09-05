@@ -126,7 +126,7 @@ async def test_property_put_cleans_replaced_assets(client, admin_auth, fake_clou
     assert destroyed == {"zent/properties/hero-old", "zent/properties/g1"}
 
 
-async def test_property_delete_cleans_cloudinary_assets(client, admin_auth, fake_cloudinary):
+async def test_property_purge_cleans_cloudinary_assets(client, admin_auth, fake_cloudinary):
     created = await client.post(
         "/api/properties",
         json=sample_property(
@@ -140,8 +140,14 @@ async def test_property_delete_cleans_cloudinary_assets(client, admin_auth, fake
     # public ids are stored, not echoed
     assert "imagePublicId" not in created.json()
 
-    deleted = await client.delete(f"/api/properties/{pid}", headers=admin_auth)
-    assert deleted.status_code == 204
+    # plain (soft) delete keeps the assets
+    soft = await client.delete(f"/api/properties/{pid}", headers=admin_auth)
+    assert soft.status_code == 204
+    assert fake_cloudinary["destroy"] == []
+
+    # purge hard-deletes and destroys them
+    purged = await client.delete(f"/api/properties/{pid}?purge=true", headers=admin_auth)
+    assert purged.status_code == 204
 
     destroyed = {c[0] for c in fake_cloudinary["destroy"]}
     assert destroyed == {

@@ -12,6 +12,8 @@ from app.schemas.staff import (
     AdminUserListResponse,
     AdminUserOut,
     AgentInvite,
+    AgentProfileOut,
+    AgentProfileUpdate,
     AssignAgentRequest,
     AttendanceEdit,
     AttendanceListResponse,
@@ -129,6 +131,30 @@ async def _safe_send(sender, to, subject, html, text) -> None:
         await sender.send(to=to, subject=subject, html=html, text=text)
     except Exception:
         pass
+
+
+@router.get("/users/{user_id}/profile", response_model=AgentProfileOut)
+async def get_user_profile(user_id: str, db: DbSession, _admin: AdminUser) -> AgentProfileOut:
+    await staff_service.get_user(db, user_id)
+    profile = await staff_service.get_or_create_profile(db, user_id)
+    await db.commit()
+    return AgentProfileOut.model_validate(profile)
+
+
+@router.put("/users/{user_id}/profile", response_model=AgentProfileOut)
+async def update_user_profile(
+    user_id: str, payload: AgentProfileUpdate, db: DbSession, admin: AdminUser, request: Request
+) -> AgentProfileOut:
+    await staff_service.get_user(db, user_id)
+    profile = await staff_service.update_profile(
+        db, user_id, payload.model_dump(exclude_unset=True)
+    )
+    await audit.record(
+        db, actor_id=admin.id, action="agent.profile_edit", target_type="user",
+        target_id=user_id, ip=_ip(request),
+    )
+    await db.commit()
+    return AgentProfileOut.model_validate(profile)
 
 
 # ---------------- agent assignment ----------------

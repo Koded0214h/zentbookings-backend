@@ -114,6 +114,25 @@ def tour_confirmed(
     )
 
 
+def tour_rescheduled(
+    *, visitor_name: str, property_title: str, scheduled_at, confirmation_code: str
+) -> RenderedEmail:
+    when = _when(scheduled_at)
+    body = (
+        f"<h2>Your tour has been rescheduled</h2><p>Hi {visitor_name}, your tour of "
+        f"<strong>{property_title}</strong> is now set for <strong>{when}</strong>.</p>"
+        f"<p>Reference: <strong>{confirmation_code}</strong>.</p>"
+    )
+    return RenderedEmail(
+        subject=f"Tour rescheduled — {confirmation_code}",
+        html=_WRAP.format(body=body),
+        text=(
+            f"Hi {visitor_name}, your tour of {property_title} is now set for {when}. "
+            f"Reference {confirmation_code}."
+        ),
+    )
+
+
 def tour_cancelled(
     *, visitor_name: str, property_title: str, scheduled_at, confirmation_code: str
 ) -> RenderedEmail:

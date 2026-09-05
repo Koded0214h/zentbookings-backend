@@ -209,6 +209,7 @@ async def seeded_properties(session_factory):
                 sqft=1000 + i * 50,
                 price=(100_000 * i) if rent else (20_000 * i),
                 period="Per Month" if rent else "Per Night",
+                type="Monthly" if rent else "Nightly",
                 year_built=2016 + (i % 8),
                 amenities=["Gym"] if i % 2 else ["Pool", "Gym"],
                 description=f"Desc {i}",

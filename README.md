@@ -80,17 +80,19 @@ locked out.
 |---|---|---|---|
 | GET | `/properties` | – | Paginated listing + filters |
 | GET | `/properties/{id}` | – | Single property (404 envelope if missing) |
-| POST | `/properties` | admin/agent | Create |
+| POST | `/properties` | admin/agent | Create (`createdById` = the acting user; `type` derived from `period` if omitted) |
 | PUT | `/properties/{id}` | admin/agent | Partial update (only provided keys) |
-| DELETE | `/properties/{id}` | admin/agent | Remove (204) |
+| DELETE | `/properties/{id}` | admin | Soft delete (hidden from all reads). `?purge=true` → hard delete + cascade + destroy media |
+| POST | `/properties/{id}/restore` | admin | Un-delete a soft-deleted property |
 
 `GET /properties` query params: `page` (1), `limit` (1–100, default 9),
 `category` (Rent/Shortlet, case-insensitive), `location` (case-insensitive
-substring), `type` (mapped onto `period`: Monthly→"Per Month",
-Nightly→"Per Night"), `priceMin`, `priceMax`, `q` (free-text over
-title/location/description), `sort` (`id` | `-id` | `price` | `-price` |
-`newest` | `oldest`; default `id`). Response envelope:
-`{ properties[], total, page, limit, totalPages }`.
+substring), `type` (exact, case-insensitive — `Monthly`/`Yearly`/`Nightly`/`Weekly`),
+`amenities` (comma-separated; matches properties having **all** of them),
+`priceMin`, `priceMax`, `q` (free-text over title/location/description),
+`sort` (`id` | `-id` | `price` | `-price` | `newest` | `oldest`; default `id`).
+Response envelope: `{ properties[], total, page, limit, totalPages }`; each
+property carries `type` and `createdById`. Soft-deleted properties never appear.
 
 Both GET routes are rate-limited (`LIST_RATE_LIMIT`, default 300/60 per IP) and
 send `ETag` + `Cache-Control: public, max-age=<PROPERTIES_CACHE_MAX_AGE>`; a
@@ -109,9 +111,10 @@ Seed 72 demo properties: `uv run python scripts/seed_properties.py [--force]`.
 `image` / `gallery[]` on a property stay plain URL strings (PRD contract).
 Pass the optional `imagePublicId` / `galleryPublicIds` from an upload response
 when creating/updating a property — they're stored (not returned). Assets are
-destroyed on `DELETE /properties/{id}` **and** on `PUT` for any public id the
-update dereferences. Needs `CLOUDINARY_*` env vars; endpoints return
-`503 media_not_configured` without them.
+destroyed on `PUT` for any public id the update dereferences, and on
+`DELETE /properties/{id}?purge=true`. A plain (soft) `DELETE` keeps the assets
+so a `restore` still has its images. Needs `CLOUDINARY_*` env vars; endpoints
+return `503 media_not_configured` without them.
 
 **Orphan sweep:** the maintenance loop (`run_cleanup_once`) also lists the
 Cloudinary folder and destroys any asset no property references (by stored
@@ -159,6 +162,7 @@ Roles: `user` (default) · `agent` · `admin`. `require_staff` = agent|admin,
 | GET | `/admin/users` | admin | list/filter (`role`, `isActive`, `q`), paginated |
 | GET/PATCH | `/admin/users/{id}` · `/role` · `/status` | admin | view / change role / (de)activate — **last-admin guarded** |
 | POST | `/admin/agents/invite` | admin | create agent/admin + email a set-password link (`/auth/reset-password` token) |
+| GET·PUT | `/admin/users/{id}/profile` | admin | view / edit any staff member's public "Meet the Team" profile |
 | GET/POST/DELETE | `/admin/properties/{id}/agents[...]` | admin | list / assign / unassign agents (soft) |
 | GET | `/admin/attendance` · `/attendance/summary` | admin | all staff sessions + per-user hours |
 | PATCH | `/admin/attendance/{id}` | admin | correct a record (recomputes duration) |
@@ -240,6 +244,25 @@ lands on `/dev/oauth-landing` so you can see the `?token=` round trip in a brows
 - **Credentials → OAuth 2.0 Client IDs → (your Web client):** Authorized redirect
   URIs must list every `GOOGLE_REDIRECT_URI` verbatim
   (`http://localhost:8000/api/auth/google/callback`,
-  `https://api.zentbookings.com/api/auth/google/callback`).
+  `https://zentbookings-backend.onrender.com/api/auth/google/callback`).
 - **OAuth consent screen / Branding:** app name "Zent", logo, support email,
-  app domain links, and authorized domain `zentbookings.com`.
+  app domain links, and authorized domain `zentbookings.com`. App verification is
+  handled by moving the domain to the new company account.
+
+## Email deliverability (DNS)
+
+Transactional email (OTP, password reset, staff invite, tour notifications) goes
+out through Hostinger SMTP on `smtp.hostinger.com:587` (STARTTLS — port 465 is
+blocked on some networks). Fresh domains land in spam without SPF/DKIM/DMARC.
+Add these records to `zentbookings.com` DNS (Hostinger's panel has a one-click
+"add email records" for the first two):
+
+| Type | Host | Value |
+|---|---|---|
+| `TXT` (SPF) | `@` | `v=spf1 include:_spf.mail.hostinger.com ~all` |
+| `TXT`/`CNAME` (DKIM) | as issued by Hostinger's DKIM setup | (enable DKIM in Hostinger → Emails → it shows the exact record) |
+| `TXT` (DMARC) | `_dmarc` | `v=DMARC1; p=none; rua=mailto:davidezekiel@zentbookings.com; fo=1` |
+
+After they propagate, send a test with `uv run python scripts/test_email.py
+you@example.com` and check the received headers show `spf=pass` and `dkim=pass`.
+Move `p=none` → `p=quarantine` once you've confirmed nothing legit is failing.

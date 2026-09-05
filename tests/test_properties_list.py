@@ -53,17 +53,70 @@ async def test_filter_by_price_range(client, seeded_properties):
     assert all(300_000 <= p["price"] <= 900_000 for p in res["properties"])
 
 
-async def test_type_param_maps_to_period(client, seeded_properties):
+async def test_type_filter_exact_match(client, seeded_properties):
     monthly = (
-        await client.get("/api/properties", params={"type": "Monthly", "limit": 100})
+        await client.get("/api/properties", params={"type": "monthly", "limit": 100})
     ).json()
-    assert monthly["total"] > 0
-    assert all(p["period"] == "Per Month" for p in monthly["properties"])
+    assert monthly["total"] == 12  # even i -> Rent -> "Monthly"
+    assert all(p["type"] == "Monthly" for p in monthly["properties"])
 
     nightly = (
         await client.get("/api/properties", params={"type": "Nightly", "limit": 100})
     ).json()
-    assert all(p["period"] == "Per Night" for p in nightly["properties"])
+    assert nightly["total"] == 13
+    assert all(p["type"] == "Nightly" for p in nightly["properties"])
+
+
+async def test_amenity_filter_requires_all(client, admin_auth):
+    for title, ams in (
+        ("Pool House", ["Private Pool", "Gym"]),
+        ("Gym Flat", ["Gym"]),
+        ("Full House", ["Private Pool", "Gym", "24/7 Security"]),
+    ):
+        await client.post(
+            "/api/properties",
+            json=sample_property(title=title, amenities=ams),
+            headers=admin_auth,
+        )
+
+    pool = (await client.get("/api/properties", params={"amenities": "Private Pool"})).json()
+    assert {p["title"] for p in pool["properties"]} == {"Pool House", "Full House"}
+
+    both = (
+        await client.get("/api/properties", params={"amenities": "private pool,24/7 security"})
+    ).json()
+    assert {p["title"] for p in both["properties"]} == {"Full House"}
+
+
+async def test_soft_delete_hides_and_restore_brings_back(client, admin_auth):
+    created = await client.post(
+        "/api/properties", json=sample_property(title="Ghost"), headers=admin_auth
+    )
+    pid = created.json()["id"]
+    assert created.json()["type"] == "Monthly"  # derived from period
+    assert created.json()["createdById"]  # set to the acting staff user
+
+    assert (await client.delete(f"/api/properties/{pid}", headers=admin_auth)).status_code == 204
+
+    # gone from list + detail
+    assert (await client.get("/api/properties")).json()["total"] == 0
+    assert (await client.get(f"/api/properties/{pid}")).status_code == 404
+
+    restored = await client.post(f"/api/properties/{pid}/restore", headers=admin_auth)
+    assert restored.status_code == 200
+    assert (await client.get(f"/api/properties/{pid}")).status_code == 200
+    assert (await client.get("/api/properties")).json()["total"] == 1
+
+
+async def test_restore_requires_admin(client, agent_auth, admin_auth):
+    pid = (
+        await client.post("/api/properties", json=sample_property(), headers=admin_auth)
+    ).json()["id"]
+    await client.delete(f"/api/properties/{pid}", headers=admin_auth)
+    denied = await client.post(
+        f"/api/properties/{pid}/restore", headers=agent_auth["headers"]
+    )
+    assert denied.status_code == 403
 
 
 async def test_sort_by_price(client, seeded_properties):
