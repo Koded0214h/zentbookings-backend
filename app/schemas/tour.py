@@ -142,6 +142,19 @@ class ScheduleUpdate(CamelModel):
     weekly_hours: dict[str, list[list[str]]] | None = None
     blackout_dates: list[str] | None = None
 
+    @field_validator("timezone")
+    @classmethod
+    def _valid_tz(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown IANA timezone: {v}") from exc
+        return v
+
     @field_validator("weekly_hours")
     @classmethod
     def _valid_hours(cls, v):

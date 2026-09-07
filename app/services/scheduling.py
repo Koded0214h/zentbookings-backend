@@ -42,8 +42,19 @@ def _parse_hhmm(value: str) -> time:
     return time(int(hh), int(mm))
 
 
-async def get_or_create_schedule(db: AsyncSession, property_id: int) -> PropertySchedule:
-    schedule = await db.get(PropertySchedule, property_id)
+async def get_or_create_schedule(
+    db: AsyncSession, property_id: int, *, for_update: bool = False
+) -> PropertySchedule:
+    if for_update:
+        # serialise concurrent bookings for the same property so the slot
+        # capacity check can't race (no-op on SQLite; row lock on Postgres)
+        schedule = await db.scalar(
+            select(PropertySchedule)
+            .where(PropertySchedule.property_id == property_id)
+            .with_for_update()
+        )
+    else:
+        schedule = await db.get(PropertySchedule, property_id)
     if schedule is None:
         schedule = PropertySchedule(property_id=property_id)
         db.add(schedule)

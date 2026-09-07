@@ -28,6 +28,12 @@ class PropertyNotFound(AppError):
         super().__init__(404, "property_not_found", "Property not found.")
 
 
+def _like(term: str) -> str:
+    """Escape LIKE wildcards so a search for '%' or '_' is literal."""
+    escaped = term.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 @dataclass(slots=True)
 class PropertyFilters:
     category: str | None = None
@@ -46,7 +52,7 @@ def _apply_filters(stmt, f: PropertyFilters):
     if f.category:
         stmt = stmt.where(func.lower(Property.category) == f.category.lower())
     if f.location:
-        stmt = stmt.where(Property.location.ilike(f"%{f.location}%"))
+        stmt = stmt.where(Property.location.ilike(_like(f.location), escape="\\"))
     if f.type:
         stmt = stmt.where(func.lower(Property.type) == f.type.strip().lower())
     if f.price_min is not None:
@@ -54,17 +60,22 @@ def _apply_filters(stmt, f: PropertyFilters):
     if f.price_max is not None:
         stmt = stmt.where(Property.price <= f.price_max)
     if f.q:
-        term = f"%{f.q.strip()}%"
+        term = _like(f.q)
         stmt = stmt.where(
             or_(
-                Property.title.ilike(term),
-                Property.location.ilike(term),
-                Property.description.ilike(term),
+                Property.title.ilike(term, escape="\\"),
+                Property.location.ilike(term, escape="\\"),
+                Property.description.ilike(term, escape="\\"),
             )
         )
     if f.amenities:
         stmt = stmt.where(
-            and_(*[Property.amenities_text.ilike(f"%{a.strip().lower()}%") for a in f.amenities])
+            and_(
+                *[
+                    Property.amenities_text.ilike(_like(a.lower()), escape="\\")
+                    for a in f.amenities
+                ]
+            )
         )
     return stmt
 
@@ -112,6 +123,13 @@ async def create_property(
         values["type"] = derive_type(values["period"])
     row = Property(**values, created_by_id=actor_id)
     db.add(row)
+    await db.flush()
+
+    # create the tour schedule up front so the booking path always has a row to
+    # lock (removes the first-booking capacity race)
+    from app.models.tour import PropertySchedule
+
+    db.add(PropertySchedule(property_id=row.id))
     await db.flush()
     return row
 

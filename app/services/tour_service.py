@@ -69,7 +69,7 @@ async def create_tour(
             422, "validation_error", f"Missing required visitor fields: {', '.join(missing)}"
         )
 
-    schedule = await scheduling.get_or_create_schedule(db, prop.id)
+    schedule = await scheduling.get_or_create_schedule(db, prop.id, for_update=True)
     scheduled_at = await scheduling.resolve_and_validate_slot(
         db, schedule, d=data.scheduled_date, t=data.time_obj()
     )
@@ -191,7 +191,7 @@ async def patch_tour(
     if scheduled_date is not None or scheduled_time is not None:
         if tour.status == "CANCELLED":
             raise TourStateError("A cancelled tour cannot be rescheduled.")
-        schedule = await scheduling.get_or_create_schedule(db, tour.property_id)
+        schedule = await scheduling.get_or_create_schedule(db, tour.property_id, for_update=True)
         new_dt = await scheduling.resolve_and_validate_slot(
             db, schedule, d=scheduled_date, t=scheduled_time
         )

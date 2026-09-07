@@ -12,6 +12,12 @@ def validate_password_strength(v: str) -> str:
     return v
 
 
+def non_blank(v: str) -> str:
+    if not v.strip():
+        raise ValueError("must not be blank")
+    return v.strip()
+
+
 class CamelModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -28,6 +34,7 @@ class RegisterRequest(CamelModel):
     password: str = Field(min_length=8, max_length=128)
 
     _pw = field_validator("password")(validate_password_strength)
+    _names = field_validator("first_name", "last_name")(non_blank)
 
 
 class LoginRequest(CamelModel):

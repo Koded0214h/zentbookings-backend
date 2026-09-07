@@ -228,7 +228,7 @@ orphaned Cloudinary assets every `CLEANUP_INTERVAL_SECONDS`. Run it by hand:
 
 ## Tests
 ```bash
-uv run pytest        # 32 tests, in-memory SQLite, no external services
+uv run pytest        # 200+ tests (unit + edge cases), in-memory SQLite, no external services
 ```
 
 ## User-journey script
