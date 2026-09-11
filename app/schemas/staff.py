@@ -190,3 +190,24 @@ class PublicAgentOut(CamelModel):
 
 class PublicAgentListResponse(CamelModel):
     agents: list[PublicAgentOut]
+
+
+# --- Agent settings (Module 5.6) -------------------------------------------
+class StaffSettingsOut(CamelModel):
+    notify_new_booking: bool
+    notify_new_message: bool
+    payout_bank_code: str | None = None
+    payout_bank_name: str | None = None
+    payout_account_number: str | None = None
+    payout_account_name: str | None = None
+    timezone: str
+
+
+class StaffSettingsUpdate(CamelModel):
+    notify_new_booking: bool | None = None
+    notify_new_message: bool | None = None
+    payout_bank_code: str | None = Field(default=None, max_length=20)
+    payout_bank_name: str | None = Field(default=None, max_length=120)
+    payout_account_number: str | None = Field(default=None, max_length=20)
+    payout_account_name: str | None = Field(default=None, max_length=120)
+    timezone: str | None = Field(default=None, max_length=60)

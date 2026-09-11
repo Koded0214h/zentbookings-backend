@@ -12,6 +12,7 @@ from app.api.routes import (
     auth,
     bookings,
     media,
+    messaging,
     observability,
     payments,
     properties,
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(public_agents.router, prefix=settings.API_PREFIX)
     app.include_router(bookings.router, prefix=settings.API_PREFIX)
     app.include_router(payments.router, prefix=settings.API_PREFIX)
+    app.include_router(messaging.router, prefix=settings.API_PREFIX)
     app.include_router(observability.router)  # no /api prefix, no auth
 
     if not settings.PROD:

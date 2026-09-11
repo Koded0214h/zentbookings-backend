@@ -2,12 +2,14 @@
 
 from app.core.database import Base  # noqa: F401
 from app.models.booking import Booking, Payment, Wallet, WalletTransaction  # noqa: F401
+from app.models.messaging import Conversation, Message  # noqa: F401
 from app.models.property import Property  # noqa: F401
 from app.models.staff import (  # noqa: F401
     AgentProfile,
     AuditLog,
     PropertyAgent,
     StaffAttendance,
+    StaffSettings,
 )
 from app.models.tour import PropertySchedule, Tour  # noqa: F401
 from app.models.user import (  # noqa: F401

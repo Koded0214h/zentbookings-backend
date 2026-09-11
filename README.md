@@ -44,7 +44,7 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | `ALLOWED_OAUTH_REDIRECT_HOSTS` | allowlist for the `redirect_uri` query param (open-redirect guard) |
 | `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` | Paystack test/live API keys — bookings payments |
 | `PLATFORM_FEE_PERCENT` | cut deducted before crediting a listing owner's wallet (default 10) |
-| `REDIS_URL` | for the upcoming Module 5.7 messaging (local Redis for dev) |
+| `REDIS_URL` | messaging pub/sub (Module 5.7); falls back to an in-process broker automatically if unset/unreachable |
 
 ## Endpoints (prefix `/api`)
 | Method | Path | Auth | Purpose |
@@ -240,8 +240,47 @@ Needs `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY`; the create-booking flow
 returns `503 payment_not_configured` without them.
 
 **Wallet:** one ledger per staff user (`Wallet` balance + immutable
-`WalletTransaction` rows with a running `balanceAfter`). Payouts and an
-admin-wide wallet view are not built yet (Module 5.4 follow-up).
+`WalletTransaction` rows with a running `balanceAfter`). Payouts and a
+separate admin-wide wallet view are not built yet (Module 5.4 follow-up) —
+`GET /agent/dashboard` below already surfaces platform-wide totals for
+admins.
+
+## Agent Dashboard, Settings & Messaging (Module 5.5–5.7)
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/agent/dashboard` | staff | Totals + monthly revenue — scoped to the agent's assigned properties, or platform-wide for admin |
+| GET/PUT | `/staff/settings` | staff | Notification prefs + payout bank details + timezone |
+| POST | `/conversations` | optional | Open (or reuse) a thread on a property + post the first message. Guests get a `guestToken` back. |
+| GET | `/conversations` | Bearer | Own threads; staff see threads for their assigned properties (all for admin) |
+| GET | `/conversations/{id}` | Bearer or `?guestToken=` | Thread summary |
+| GET | `/conversations/{id}/messages` | Bearer or `?guestToken=` | Paginated history |
+| POST | `/conversations/{id}/messages` | Bearer or `guestToken` in body | Send a message |
+| WS | `/ws/conversations/{id}?token=`/`?guestToken=` | as above | Live delivery |
+
+`GET /agent/dashboard` returns `{ totalListings, activeBookings,
+totalEarnings, pendingPayouts, monthlyRevenue: [{ month, amount }] }`.
+`totalEarnings`/`pendingPayouts` come from the wallet ledger — for an agent,
+their own wallet; for an admin, summed across every staff wallet.
+
+**Conversations** are one thread per (property, guest) pair — a repeat
+`POST /conversations` from the same guest email (or the same logged-in
+user) on the same property reuses the existing open thread instead of
+creating a new one. An unauthenticated guest gets back a `guestToken` on
+creation (same spirit as a booking confirmation code) — pass it as
+`?guestToken=` (GET) or in the JSON body (POST) to read/reply without an
+account, or as a WS query param to connect live.
+
+**Live delivery:** the WebSocket relays messages via Redis pub/sub
+(`REDIS_URL`) so it works across multiple backend instances. If Redis isn't
+reachable, it **automatically falls back** to an in-process broker (plain
+asyncio queues) — local dev and tests work without a running Redis; the
+tradeoff is that fan-out only reaches connections on the same process.
+
+**Moderation:** flag-and-allow — a message that looks like it contains a
+phone number, bank account number, or email address is still delivered but
+stored with `flagged: true` and a `flagReason` (nudges toward keeping
+contact on-platform without blocking anyone).
 
 ## Observability
 

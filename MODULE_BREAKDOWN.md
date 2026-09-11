@@ -3,10 +3,9 @@
 > Derived from [`PRODUCT_REQUIREMENTS.md`](./PRODUCT_REQUIREMENTS.md) v1.0
 > Purpose: decompose the backend into top-level modules, each with submodules,
 > so work can be split, estimated, and owned independently.
-> Modules 1–4 are built. Module 5.1–5.4 are built (listings, bookings,
-> Paystack payments, minimal wallet — verified live against Neon + real
-> Paystack test-mode API). 5.5–5.7 (full dashboard, agent settings,
-> messaging) remain.
+> Modules 1–5 are built. Listings, bookings, Paystack payments, wallet,
+> agent dashboard, agent settings, and Redis-backed messaging are all live
+> and verified against Neon (+ real Paystack test-mode API for payments).
 
 ---
 
@@ -281,14 +280,13 @@ Modules 2 and 3; hangs an auto clock-out sweep off the Module 3 maintenance loop
 
 ## Module 5 — Bookings, Payments & Agent Dashboard
 
-> **Status: 5.1–5.4 built and live-verified** against Neon + the real
-> Paystack test-mode API (end-to-end: create listing with the new fields,
-> create a booking, initialize a real Paystack transaction, confirm via a
-> signed webhook, wallet credited net of platform fee). 5.5–5.7 (full
-> dashboard, agent settings, messaging) remain. Decisions taken: **Bookings
-> are a new, separate concept from Tours** (Tours stay free viewing
-> appointments, untouched). Payment processor is **Paystack**. Messaging
-> will be **Redis-backed**, using a local Redis instance for dev.
+> **Status: 5.1–5.7 built and live-verified** against Neon (+ the real
+> Paystack test-mode API for payments): listings, bookings, Paystack
+> payments, wallet, agent dashboard, agent settings, and Redis-backed
+> messaging (with a graceful in-process fallback when Redis isn't running).
+> Decisions taken: **Bookings are a new, separate concept from Tours**
+> (Tours stay free viewing appointments, untouched). Payment processor is
+> **Paystack**. Messaging is **Redis-backed**.
 
 ### 5.1 Listing details (extends Property) — built
 The "Add New Listing" wizard needs fields the current `Property` model
@@ -348,24 +346,41 @@ the existing Module 2 contract:
   transfer via Paystack's Transfers API is a later increment behind the
   same interface)
 
-### 5.5 Agent dashboard
-- `GET /agent/dashboard`: total listings, active bookings, total earnings,
-  pending payouts, monthly revenue series — scoped to the caller's assigned
-  properties (same soft-assignment pattern as `/agent/properties`)
+### 5.5 Agent dashboard — built
+- `GET /agent/dashboard`: total listings, active bookings, total earnings
+  (lifetime wallet credits), pending payouts (current wallet balance),
+  monthly revenue series (last 6 months of credits)
+- Scoped to the caller's assigned properties for an **agent** (same
+  soft-assignment pattern as `/agent/properties`); an **admin** calling the
+  same endpoint gets the platform-wide equivalent — all properties, all
+  bookings, and totals aggregated across every staff wallet (resolves
+  decision #5 below without a separate endpoint)
 
-### 5.6 Agent settings
-- `GET/PUT /staff/settings`: notification preferences, payout bank details
-  (account number/bank code, needed for Paystack Transfers), timezone
+### 5.6 Agent settings — built
+- `GET/PUT /staff/settings`: notification preferences
+  (`notifyNewBooking`/`notifyNewMessage`), payout bank details
+  (`payoutBankCode`/`payoutBankName`/`payoutAccountNumber`/
+  `payoutAccountName` — needed for a future Paystack Transfers payout),
+  `timezone`
 
-### 5.7 Messaging (Redis-backed)
-- `Conversation` (per property + guest pair) and `Message` (Postgres is the
-  source of truth); Redis pub/sub fans messages out to connected clients
-- `WS /ws/conversations/{id}` for live delivery; REST for history
-  (`GET /conversations`, `GET /conversations/{id}/messages`,
-  `POST /conversations/{id}/messages`)
-- Basic content moderation: flag messages that look like they contain a
-  phone number or bank account (matches the "no sharing contact info" rule
-  in the mock UI)
+### 5.7 Messaging (Redis-backed) — built
+- `Conversation` (one thread per property + guest pair, reused on repeat
+  contact) and `Message` (Postgres is the source of truth); Redis pub/sub
+  fans messages out to connected clients, with an **automatic in-process
+  fallback** (plain asyncio queues) when Redis isn't reachable — keeps
+  local dev and CI working without a running Redis, at the cost of only
+  fanning out within a single process
+- `WS /ws/conversations/{id}?token=` (staff/user) or `?guestToken=` (guest)
+  for live delivery; REST for everything else: `POST /conversations`
+  (opens/reuses a thread + first message, returns a `guestToken` for
+  unauthenticated guests — same spirit as a booking confirmation code),
+  `GET /conversations` (self-scoped/staff, same assigned-property scoping
+  as the dashboard), `GET /conversations/{id}`, `GET
+  /conversations/{id}/messages`, `POST /conversations/{id}/messages`
+- Content moderation resolved as **flag-and-allow** (decision #4 below): a
+  message containing what looks like a phone number, bank account number,
+  or email address is delivered normally but stored with `flagged=true` +
+  `flagReason`
 - Config: `REDIS_URL` (local Redis for dev; a hosted instance — Render Key
   Value / Upstash — needed before this goes to production)
 
@@ -374,8 +389,10 @@ the existing Module 2 contract:
 2. Whether `Booking` needs its own per-property capacity beyond date-overlap
    (e.g. multi-unit listings)
 3. Payout cadence (on-demand admin action vs. a scheduled payout run)
-4. Message moderation: flag-and-allow vs. block outright
-5. Whether `/agent/dashboard` needs an admin-wide equivalent now or later
+4. ~~Message moderation: flag-and-allow vs. block outright~~ → **resolved:
+   flag-and-allow** (5.7)
+5. ~~Whether `/agent/dashboard` needs an admin-wide equivalent now or
+   later~~ → **resolved: same endpoint, branches on role** (5.5)
 
 ---
 

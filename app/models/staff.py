@@ -72,6 +72,30 @@ class AuditLog(TimestampMixin, Base):
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class StaffSettings(Base):
+    """Per-staff-member preferences: notifications, payout bank details, timezone."""
+
+    __tablename__ = "staff_settings"
+
+    user_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    notify_new_booking: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_new_message: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    payout_bank_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payout_bank_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    payout_account_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payout_account_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(60), default="Africa/Lagos", nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class AgentProfile(TimestampMixin, Base):
     """Public 'Meet the Team' profile for an agent/admin."""
 

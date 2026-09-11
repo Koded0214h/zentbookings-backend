@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     # --- Messaging (Redis-backed) -------------------------------------------
     REDIS_URL: str | None = "redis://localhost:6379/0"
     MESSAGE_SEND_RATE_LIMIT: str = "30/60"
+    CONVERSATION_CREATE_RATE_LIMIT: str = "10/300"
 
     # --- Derived helpers -----------------------------------------------------
     @property

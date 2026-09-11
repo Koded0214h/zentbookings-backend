@@ -13,6 +13,8 @@ from app.schemas.staff import (
     AttendanceOut,
     AttendanceStatusOut,
     ClockInRequest,
+    StaffSettingsOut,
+    StaffSettingsUpdate,
 )
 from app.services import attendance_service, staff_service, wallet_service
 from app.services.attendance_service import AttendanceFilters
@@ -94,3 +96,21 @@ async def get_my_wallet(db: DbSession, user: StaffUser) -> WalletOut:
         currency=wallet.currency,
         transactions=[WalletTransactionOut.model_validate(t) for t in transactions],
     )
+
+
+@router.get("/settings", response_model=StaffSettingsOut)
+async def get_my_settings(db: DbSession, user: StaffUser) -> StaffSettingsOut:
+    row = await staff_service.get_or_create_settings(db, user.id)
+    await db.commit()
+    return StaffSettingsOut.model_validate(row)
+
+
+@router.put("/settings", response_model=StaffSettingsOut)
+async def update_my_settings(
+    payload: StaffSettingsUpdate, db: DbSession, user: StaffUser
+) -> StaffSettingsOut:
+    row = await staff_service.update_settings(
+        db, user.id, payload.model_dump(exclude_unset=True)
+    )
+    await db.commit()
+    return StaffSettingsOut.model_validate(row)

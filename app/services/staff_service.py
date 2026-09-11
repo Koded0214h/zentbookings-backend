@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.models.property import Property
-from app.models.staff import AgentProfile, PropertyAgent
+from app.models.staff import AgentProfile, PropertyAgent, StaffSettings
 from app.models.user import User
 from app.services import auth_service
 
@@ -183,6 +183,23 @@ async def update_profile(db: AsyncSession, user_id: str, changes: dict) -> Agent
         setattr(profile, key, value)
     await db.flush()
     return profile
+
+
+async def get_or_create_settings(db: AsyncSession, user_id: str) -> StaffSettings:
+    settings_row = await db.get(StaffSettings, user_id)
+    if settings_row is None:
+        settings_row = StaffSettings(user_id=user_id)
+        db.add(settings_row)
+        await db.flush()
+    return settings_row
+
+
+async def update_settings(db: AsyncSession, user_id: str, changes: dict) -> StaffSettings:
+    settings_row = await get_or_create_settings(db, user_id)
+    for key, value in changes.items():
+        setattr(settings_row, key, value)
+    await db.flush()
+    return settings_row
 
 
 async def list_published_agents(db: AsyncSession) -> list[tuple[User, AgentProfile]]:

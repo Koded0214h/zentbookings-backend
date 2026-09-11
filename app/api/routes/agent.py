@@ -5,13 +5,24 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession, StaffUser
+from app.schemas.dashboard import DashboardOut
 from app.schemas.property import PropertyOut
 from app.schemas.tour import TourListResponse, TourOut
-from app.services import property_service, staff_service, tour_service
+from app.services import dashboard_service, property_service, staff_service, tour_service
 from app.services.property_service import PropertyFilters
 from app.services.tour_service import TourFilters
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+@router.get("/dashboard", response_model=DashboardOut)
+async def dashboard(db: DbSession, user: StaffUser) -> DashboardOut:
+    is_admin = user.role == "admin"
+    property_ids = None if is_admin else await staff_service.assigned_property_ids(db, user.id)
+    data = await dashboard_service.agent_dashboard(
+        db, user_id=user.id, property_ids=property_ids, admin_wide=is_admin
+    )
+    return DashboardOut.model_validate(data)
 
 
 @router.get("/properties", response_model=list[PropertyOut])

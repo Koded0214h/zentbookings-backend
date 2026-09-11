@@ -18,6 +18,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "cloudinary>=1.40",
     "tzdata>=2024.1",
+    "redis>=8.1.0",
 ]
 
 [project.optional-dependencies]
