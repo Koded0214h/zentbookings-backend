@@ -42,6 +42,9 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | `GOOGLE_REDIRECT_URI` | backend callback, must match GCP exactly |
 | `FRONTEND_BASE_URL` | where OAuth returns the user with `?token=` |
 | `ALLOWED_OAUTH_REDIRECT_HOSTS` | allowlist for the `redirect_uri` query param (open-redirect guard) |
+| `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` | Paystack test/live API keys — bookings payments |
+| `PLATFORM_FEE_PERCENT` | cut deducted before crediting a listing owner's wallet (default 10) |
+| `REDIS_URL` | for the upcoming Module 5.7 messaging (local Redis for dev) |
 
 ## Endpoints (prefix `/api`)
 | Method | Path | Auth | Purpose |
@@ -100,6 +103,14 @@ matching `If-None-Match` gets `304`.
 
 Grant a user staff access: `uv run python scripts/grant_role.py <email> admin`.
 Seed 72 demo properties: `uv run python scripts/seed_properties.py [--force]`.
+
+**Listing details (Module 5.1):** `POST`/`PUT` accept and `GET` returns
+structured location (`streetAddress`, `city`, `stateRegion`, `zipCode`,
+`country` — supplementary to the primary `location` field) and short-let
+booking policy (`cleaningFee`, `securityDeposit`, `minimumStayNights`,
+`cancellationPolicy` — `Flexible`/`Moderate`/`Strict`, `checkInTime`/
+`checkOutTime` — `HH:MM`, `maxGuests`, `petsAllowed`). All additive/defaulted,
+existing clients unaffected.
 
 ### Media uploads (Cloudinary)
 | Method | Path | Auth | Purpose |
@@ -184,6 +195,53 @@ per `LAST_SEEN_THROTTLE_SECONDS` (900). Visible in the admin user views only.
 **Auto clock-out:** the maintenance loop force-closes sessions open longer than
 `ATTENDANCE_AUTO_CLOSE_HOURS` (16, `autoClosed=true`). `AUDIT_RETENTION_DAYS`
 (0 = keep) optionally prunes the audit log.
+
+## Bookings, Payments & Wallet (Module 5.1–5.4)
+
+Paid short-let bookings — a separate concept from the free Tour viewing
+appointments in Module 3. Payment processor is **Paystack**.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/bookings` | optional | Create a `PENDING_PAYMENT` booking + initialize a Paystack transaction. Rate-limited (`BOOKING_CREATE_RATE_LIMIT`). |
+| GET | `/bookings` | Bearer | Own bookings; staff see all + `?status=`/`?propertyId=` filters. Paginated. |
+| GET | `/bookings/{id}` | Bearer | Owner or staff (`403` otherwise) |
+| DELETE | `/bookings/{id}` | Bearer | Staff cancel (audited) |
+| POST | `/bookings/lookup` | – | Guest self-service: `{ confirmationCode, email }` → booking. Rate-limited (`BOOKING_LOOKUP_RATE_LIMIT`). |
+| POST | `/bookings/cancel` | – | Guest cancel by `{ confirmationCode, email }` |
+| GET | `/properties/{id}/blocked-dates` | – | Confirmed date ranges for a booking calendar |
+| GET | `/payments/config` | – | `{ publicKey }` for the Paystack frontend SDK |
+| POST | `/payments/webhook/paystack` | signature | Paystack event webhook |
+| GET | `/staff/wallet` | staff | Own wallet balance + recent transactions |
+
+`POST /bookings` body: `propertyId`, `guestName`/`guestEmail`/`guestPhone`
+(required for guests, auto-filled from the account otherwise), `checkIn`/
+`checkOut` (YYYY-MM-DD), `guests?`, `notes?`, `redirectUrl?` (validated
+against the same host allowlist as OAuth, used as the Paystack callback
+URL). Response: `{ booking: {...}, payment: { reference, authorizationUrl } }`.
+Pricing is snapshotted onto the booking at creation time (`pricePerNight`,
+`cleaningFee`, `securityDeposit`, `subtotal`, `totalAmount`) so later
+property price changes don't affect existing bookings.
+
+**Availability:** date-range overlap against a property's existing
+`CONFIRMED`/`ACTIVE` bookings only — a `PENDING_PAYMENT` booking never blocks
+dates, so an abandoned checkout can't lock a listing. The maintenance loop
+auto-cancels unpaid bookings older than `BOOKING_PAYMENT_TIMEOUT_MINUTES`
+(default 30).
+
+**Payments:** `POST /bookings` initializes a Paystack transaction (amount in
+kobo) and returns `authorizationUrl` for the frontend to redirect to. The
+webhook verifies `x-paystack-signature` (HMAC-SHA512 over the raw body) and,
+on `charge.success`, marks the booking `CONFIRMED`, credits the listing
+owner's wallet net of `PLATFORM_FEE_PERCENT` (default 10%), and emails a
+booking-confirmed notice. Idempotent against Paystack's automatic webhook
+retries; unknown references are a silent `200 { received: true }` no-op.
+Needs `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY`; the create-booking flow
+returns `503 payment_not_configured` without them.
+
+**Wallet:** one ledger per staff user (`Wallet` balance + immutable
+`WalletTransaction` rows with a running `balanceAfter`). Payouts and an
+admin-wide wallet view are not built yet (Module 5.4 follow-up).
 
 ## Observability
 

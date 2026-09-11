@@ -13,7 +13,7 @@ from app.core.database import SessionLocal
 from app.models.property import Property
 from app.models.staff import AuditLog
 from app.models.user import EmailOtp, OAuthState, PasswordResetToken, TokenDenylist
-from app.services import attendance_service, media
+from app.services import attendance_service, booking_service, media
 
 logger = logging.getLogger("zent.maintenance")
 
@@ -100,6 +100,9 @@ async def run_cleanup_once() -> dict[str, int]:
         counts = await purge_expired(db)
         counts["stale_attendance"] = await attendance_service.close_stale(
             db, older_than_hours=settings.ATTENDANCE_AUTO_CLOSE_HOURS
+        )
+        counts["expired_bookings"] = await booking_service.expire_unpaid(
+            db, older_than_minutes=settings.BOOKING_PAYMENT_TIMEOUT_MINUTES
         )
         await db.commit()
         counts["pruned_audit"] = await prune_audit(db)

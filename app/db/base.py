@@ -1,6 +1,7 @@
 """Import surface for Alembic autogenerate and test schema creation."""
 
 from app.core.database import Base  # noqa: F401
+from app.models.booking import Booking, Payment, Wallet, WalletTransaction  # noqa: F401
 from app.models.property import Property  # noqa: F401
 from app.models.staff import (  # noqa: F401
     AgentProfile,

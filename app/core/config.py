@@ -115,6 +115,18 @@ class Settings(BaseSettings):
     CLOUDINARY_API_SECRET: str | None = None
     CLOUDINARY_UPLOAD_FOLDER: str = "zent/properties"
 
+    # --- Paystack (bookings payments) ---------------------------------------
+    PAYSTACK_SECRET_KEY: str | None = None
+    PAYSTACK_PUBLIC_KEY: str | None = None
+    PLATFORM_FEE_PERCENT: float = 10.0
+    BOOKING_CREATE_RATE_LIMIT: str = "5/300"      # bookings per client IP
+    BOOKING_LOOKUP_RATE_LIMIT: str = "10/300"
+    BOOKING_PAYMENT_TIMEOUT_MINUTES: int = 30     # unpaid bookings auto-cancel after this
+
+    # --- Messaging (Redis-backed) -------------------------------------------
+    REDIS_URL: str | None = "redis://localhost:6379/0"
+    MESSAGE_SEND_RATE_LIMIT: str = "30/60"
+
     # --- Derived helpers -----------------------------------------------------
     @property
     def cors_origins_list(self) -> list[str]:
@@ -136,6 +148,10 @@ class Settings(BaseSettings):
             and self.CLOUDINARY_API_KEY
             and self.CLOUDINARY_API_SECRET
         )
+
+    @property
+    def paystack_configured(self) -> bool:
+        return bool(self.PAYSTACK_SECRET_KEY and self.PAYSTACK_PUBLIC_KEY)
 
     @property
     def apple_configured(self) -> bool:

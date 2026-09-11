@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, status
 
 from app.api.deps import DbSession, StaffUser
+from app.schemas.booking import WalletOut, WalletTransactionOut
 from app.schemas.staff import (
     AgentProfileOut,
     AgentProfileUpdate,
@@ -13,7 +14,7 @@ from app.schemas.staff import (
     AttendanceStatusOut,
     ClockInRequest,
 )
-from app.services import attendance_service, staff_service
+from app.services import attendance_service, staff_service, wallet_service
 from app.services.attendance_service import AttendanceFilters
 
 router = APIRouter(prefix="/staff", tags=["staff"])
@@ -24,7 +25,8 @@ async def clock_in(
     payload: ClockInRequest, db: DbSession, user: StaffUser, request: Request
 ) -> AttendanceOut:
     row = await attendance_service.clock_in(
-        db, user.id,
+        db,
+        user.id,
         source=payload.source,
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
@@ -57,7 +59,10 @@ async def my_attendance(
     )
     return AttendanceListResponse(
         records=[AttendanceOut.model_validate(r) for r in rows],
-        total=total, page=page, limit=limit, total_pages=pages,
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=pages,
     )
 
 
@@ -77,3 +82,15 @@ async def update_my_profile(
     )
     await db.commit()
     return AgentProfileOut.model_validate(profile)
+
+
+@router.get("/wallet", response_model=WalletOut)
+async def get_my_wallet(db: DbSession, user: StaffUser) -> WalletOut:
+    wallet = await wallet_service.get_or_create_wallet(db, user.id)
+    transactions = await wallet_service.recent_transactions(db, user.id)
+    await db.commit()
+    return WalletOut(
+        balance=wallet.balance,
+        currency=wallet.currency,
+        transactions=[WalletTransactionOut.model_validate(t) for t in transactions],
+    )

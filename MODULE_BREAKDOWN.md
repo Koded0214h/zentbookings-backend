@@ -3,7 +3,10 @@
 > Derived from [`PRODUCT_REQUIREMENTS.md`](./PRODUCT_REQUIREMENTS.md) v1.0
 > Purpose: decompose the backend into top-level modules, each with submodules,
 > so work can be split, estimated, and owned independently.
-> Modules 1–4 are built.
+> Modules 1–4 are built. Module 5.1–5.4 are built (listings, bookings,
+> Paystack payments, minimal wallet — verified live against Neon + real
+> Paystack test-mode API). 5.5–5.7 (full dashboard, agent settings,
+> messaging) remain.
 
 ---
 
@@ -15,6 +18,7 @@
 | 2 | **Property Catalogue** | Storing, curating, searching and serving property listings + media | 3.1–3.3, 4.2, 4.4 (Property), 6.1 |
 | 3 | **Tour Booking** | Scheduling, confirming and notifying property tours | 3.3 (Tour Modal), 4.3, 4.4 (TourBooking), 6.3 |
 | 4 | **Staff, Roles & Attendance** | Role split (user / agent / admin), user administration, agent assignment, staff clock-in/out, login & presence tracking, audit log | 2.2 (Agent persona), 2.3, — (extends 4.1/4.4) |
+| 5 | **Bookings, Payments & Agent Dashboard** | Paid short-let bookings (separate from free Tours), Paystack payments, agent wallet/payouts, dashboard analytics, agent settings, Redis-backed messaging | — (new; not in original PRD) |
 
 Cross-cutting concerns (CORS, HTTPS, config, error envelope, rate limiting,
 observability) are shared infrastructure consumed by every module — noted
@@ -272,6 +276,106 @@ Modules 2 and 3; hangs an auto clock-out sweep off the Module 3 maintenance loop
 7. Lead pipeline (`leadStatus` on tours) — build in 4.3 now or defer
 8. `agent_profiles` — build now or leave "Meet the Team" as static frontend
 9. Mobile clock-in extras (location capture / geofence) — in scope or later
+
+---
+
+## Module 5 — Bookings, Payments & Agent Dashboard
+
+> **Status: 5.1–5.4 built and live-verified** against Neon + the real
+> Paystack test-mode API (end-to-end: create listing with the new fields,
+> create a booking, initialize a real Paystack transaction, confirm via a
+> signed webhook, wallet credited net of platform fee). 5.5–5.7 (full
+> dashboard, agent settings, messaging) remain. Decisions taken: **Bookings
+> are a new, separate concept from Tours** (Tours stay free viewing
+> appointments, untouched). Payment processor is **Paystack**. Messaging
+> will be **Redis-backed**, using a local Redis instance for dev.
+
+### 5.1 Listing details (extends Property) — built
+The "Add New Listing" wizard needs fields the current `Property` model
+didn't have. Added as nullable/defaulted columns — additive, doesn't touch
+the existing Module 2 contract:
+- **Structured location**: `street_address`, `city`, `state_region`,
+  `zip_code`, `country` (in addition to the existing free-text `location`,
+  which stays the primary search/display field)
+- **Booking policy**: `cleaning_fee`, `security_deposit`,
+  `minimum_stay_nights`, `cancellation_policy`, `check_in_time`,
+  `check_out_time`, `max_guests`, `pets_allowed`
+- All exposed on `POST/PUT /properties` and `GET /properties[/{id}]`
+
+### 5.2 Bookings — built
+- `Booking`: `id`, `property_id`, guest identity (account or guest, same
+  optional-auth pattern as Tours), `check_in`/`check_out` dates, `nights`,
+  price snapshot (`price_per_night`, `cleaning_fee`, `security_deposit`,
+  `subtotal`, `total_amount`, `currency`), `status`
+  (`PENDING_PAYMENT | CONFIRMED | ACTIVE | COMPLETED | CANCELLED`),
+  `confirmation_code` (format `ZBK-XXXXXX`)
+- Availability = date-range overlap check against a property's existing
+  `CONFIRMED`/`ACTIVE` bookings only — `PENDING_PAYMENT` bookings never
+  block dates, so an abandoned checkout can't lock a listing; a maintenance
+  sweep (`expire_unpaid`, `BOOKING_PAYMENT_TIMEOUT_MINUTES`, default 30)
+  auto-cancels stale unpaid bookings
+- Endpoints: `POST /bookings` (creates a `PENDING_PAYMENT` booking +
+  initializes a Paystack transaction, returns booking + payment
+  authorizationUrl), `GET /bookings` (self-scoped for users, all for
+  staff), `GET /bookings/{id}` (owner/staff only, 403 otherwise),
+  `DELETE /bookings/{id}` (staff cancel, audited), `POST /bookings/lookup`
+  and `POST /bookings/cancel` (guest, by confirmation code + email),
+  `GET /properties/{id}/blocked-dates` (public, returns confirmed date
+  ranges for a calendar UI)
+
+### 5.3 Payments (Paystack) — built
+- `Payment`: `id`, `booking_id`, `provider`, `reference`, `amount`,
+  `currency`, `status`, raw webhook payload, timestamps
+- `POST /bookings` → initializes a Paystack transaction, returns
+  `authorizationUrl` for the frontend to redirect to checkout
+- `GET /payments/config` — exposes `PAYSTACK_PUBLIC_KEY` for the frontend
+  SDK
+- `POST /payments/webhook/paystack` — verifies the Paystack signature
+  (HMAC-SHA512 over the raw body vs. `x-paystack-signature`), marks the
+  booking `CONFIRMED`/paid, credits the property owner's wallet net of
+  `PLATFORM_FEE_PERCENT`, sends the `booking_confirmed` email; idempotent
+  against Paystack's automatic retries; unknown references are a silent
+  no-op (avoids retry storms)
+- Config: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PLATFORM_FEE_PERCENT`
+
+### 5.4 Wallet & payouts — partially built (read path only)
+- `Wallet` (one per staff user): balance, currency
+- `WalletTransaction`: ledger entries — `CREDIT` on a settled booking
+  payment, `DEBIT` on a payout, running `balance_after`
+- Built: `GET /staff/wallet` (own balance + recent transactions)
+- Not yet built: `GET /admin/wallets` (all wallets), `POST
+  /admin/wallets/{userId}/payout` (admin records a payout; real bank
+  transfer via Paystack's Transfers API is a later increment behind the
+  same interface)
+
+### 5.5 Agent dashboard
+- `GET /agent/dashboard`: total listings, active bookings, total earnings,
+  pending payouts, monthly revenue series — scoped to the caller's assigned
+  properties (same soft-assignment pattern as `/agent/properties`)
+
+### 5.6 Agent settings
+- `GET/PUT /staff/settings`: notification preferences, payout bank details
+  (account number/bank code, needed for Paystack Transfers), timezone
+
+### 5.7 Messaging (Redis-backed)
+- `Conversation` (per property + guest pair) and `Message` (Postgres is the
+  source of truth); Redis pub/sub fans messages out to connected clients
+- `WS /ws/conversations/{id}` for live delivery; REST for history
+  (`GET /conversations`, `GET /conversations/{id}/messages`,
+  `POST /conversations/{id}/messages`)
+- Basic content moderation: flag messages that look like they contain a
+  phone number or bank account (matches the "no sharing contact info" rule
+  in the mock UI)
+- Config: `REDIS_URL` (local Redis for dev; a hosted instance — Render Key
+  Value / Upstash — needed before this goes to production)
+
+### Decisions to settle as we build
+1. Refund policy on cancellation (full/partial/none, and by whom)
+2. Whether `Booking` needs its own per-property capacity beyond date-overlap
+   (e.g. multi-unit listings)
+3. Payout cadence (on-demand admin action vs. a scheduled payout run)
+4. Message moderation: flag-and-allow vs. block outright
+5. Whether `/agent/dashboard` needs an admin-wide equivalent now or later
 
 ---
 

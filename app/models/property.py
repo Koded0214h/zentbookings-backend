@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.database import Base
@@ -13,6 +13,7 @@ PERIODS = ("Per Month", "Per Night")
 CATEGORIES = ("Rent", "Shortlet")
 # Frontend "Type" filter — free string, but these are the values we seed / derive.
 PROPERTY_TYPES = ("Monthly", "Yearly", "Nightly", "Weekly")
+CANCELLATION_POLICIES = ("Flexible", "Moderate", "Strict")
 
 _PERIOD_TO_TYPE = {"Per Month": "Monthly", "Per Night": "Nightly"}
 
@@ -51,6 +52,24 @@ class Property(TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True, nullable=True
     )
+
+    # Structured location (Module 5.1) — `location` above stays the primary
+    # free-text search/display field; these are supplementary detail.
+    street_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state_region: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    zip_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    # Short-let booking policy (Module 5.1)
+    cleaning_fee: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    security_deposit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    minimum_stay_nights: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    cancellation_policy: Mapped[str] = mapped_column(String(30), default="Flexible", nullable=False)
+    check_in_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # "14:00"
+    check_out_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    max_guests: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    pets_allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Cloudinary bookkeeping — not exposed in PropertyOut; used to clean up
     # assets when a property is hard-deleted.

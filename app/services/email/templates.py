@@ -151,3 +151,47 @@ def tour_cancelled(
             f"({confirmation_code}) has been cancelled."
         ),
     )
+
+
+def _dates(check_in, check_out) -> str:
+    return f"{check_in.strftime('%d %b %Y')} — {check_out.strftime('%d %b %Y')}"
+
+
+def booking_confirmed(
+    *, guest_name: str, property_title: str, check_in, check_out, total_amount: int,
+    confirmation_code: str,
+) -> RenderedEmail:
+    when = _dates(check_in, check_out)
+    body = (
+        f"<h2>Your stay is confirmed</h2><p>Hi {guest_name}, your booking at "
+        f"<strong>{property_title}</strong> for <strong>{when}</strong> is confirmed. "
+        f"Total paid: <strong>₦{total_amount:,}</strong>.</p>"
+        f"<p>Reference: <strong>{confirmation_code}</strong>.</p>"
+    )
+    return RenderedEmail(
+        subject=f"Booking confirmed — {confirmation_code}",
+        html=_WRAP.format(body=body),
+        text=(
+            f"Hi {guest_name}, your booking at {property_title} for {when} is "
+            f"confirmed. Total paid: NGN {total_amount:,}. Reference {confirmation_code}."
+        ),
+    )
+
+
+def booking_cancelled(
+    *, guest_name: str, property_title: str, check_in, check_out, confirmation_code: str
+) -> RenderedEmail:
+    when = _dates(check_in, check_out)
+    body = (
+        f"<h2>Booking cancelled</h2><p>Hi {guest_name}, your booking at "
+        f"<strong>{property_title}</strong> for <strong>{when}</strong> "
+        f"({confirmation_code}) has been cancelled.</p>"
+    )
+    return RenderedEmail(
+        subject=f"Booking cancelled — {confirmation_code}",
+        html=_WRAP.format(body=body),
+        text=(
+            f"Hi {guest_name}, your booking at {property_title} for {when} "
+            f"({confirmation_code}) has been cancelled."
+        ),
+    )

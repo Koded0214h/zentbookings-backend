@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from app.api.deps import AdminUser, DbSession, StaffUser, require_roles
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
+from app.schemas.booking import BlockedDatesResponse, BlockedRange
 from app.schemas.property import (
     PropertyCreate,
     PropertyListResponse,
@@ -16,7 +17,7 @@ from app.schemas.property import (
     PropertyUpdate,
 )
 from app.schemas.tour import AvailabilityResponse, ScheduleOut, ScheduleUpdate, SlotOut
-from app.services import audit, property_service, scheduling
+from app.services import audit, booking_service, property_service, scheduling
 from app.services.property_service import PropertyFilters
 
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -106,9 +107,7 @@ async def property_availability(
     await db.commit()
     if on is not None:
         date_from = date_to = on
-    slots = await scheduling.availability(
-        db, schedule, from_date=date_from, to_date=date_to
-    )
+    slots = await scheduling.availability(db, schedule, from_date=date_from, to_date=date_to)
     return AvailabilityResponse(
         property_id=property_id,
         timezone=schedule.timezone,
@@ -120,8 +119,31 @@ async def property_availability(
 
 
 @router.get(
-    "/{property_id}/schedule", response_model=ScheduleOut, dependencies=_staff_only
+    "/{property_id}/blocked-dates",
+    response_model=BlockedDatesResponse,
+    dependencies=_read_limit,
 )
+async def property_blocked_dates(
+    property_id: int,
+    db: DbSession,
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+) -> BlockedDatesResponse:
+    """Date ranges already booked (Module 5.2) — for a booking calendar UI."""
+    await property_service.get_property(db, property_id)  # 404 if missing
+    today = date.today()
+    date_from = date_from or today
+    date_to = date_to or (today + timedelta(days=365))
+    ranges = await booking_service.blocked_ranges(
+        db, property_id, from_date=date_from, to_date=date_to
+    )
+    return BlockedDatesResponse(
+        property_id=property_id,
+        ranges=[BlockedRange(check_in=ci, check_out=co) for ci, co in ranges],
+    )
+
+
+@router.get("/{property_id}/schedule", response_model=ScheduleOut, dependencies=_staff_only)
 async def get_schedule(property_id: int, db: DbSession) -> ScheduleOut:
     await property_service.get_property(db, property_id)
     schedule = await scheduling.get_or_create_schedule(db, property_id)
@@ -129,12 +151,8 @@ async def get_schedule(property_id: int, db: DbSession) -> ScheduleOut:
     return ScheduleOut.model_validate(schedule)
 
 
-@router.put(
-    "/{property_id}/schedule", response_model=ScheduleOut, dependencies=_staff_only
-)
-async def update_schedule(
-    property_id: int, payload: ScheduleUpdate, db: DbSession
-) -> ScheduleOut:
+@router.put("/{property_id}/schedule", response_model=ScheduleOut, dependencies=_staff_only)
+async def update_schedule(property_id: int, payload: ScheduleUpdate, db: DbSession) -> ScheduleOut:
     await property_service.get_property(db, property_id)
     schedule = await scheduling.get_or_create_schedule(db, property_id)
     for key, value in payload.model_dump(exclude_unset=True).items():
@@ -144,18 +162,14 @@ async def update_schedule(
 
 
 @router.post("", response_model=PropertyOut, status_code=status.HTTP_201_CREATED)
-async def create_property(
-    payload: PropertyCreate, db: DbSession, user: StaffUser
-) -> PropertyOut:
+async def create_property(payload: PropertyCreate, db: DbSession, user: StaffUser) -> PropertyOut:
     row = await property_service.create_property(db, payload, actor_id=user.id)
     await db.commit()
     return PropertyOut.model_validate(row)
 
 
 @router.put("/{property_id}", response_model=PropertyOut, dependencies=_staff_only)
-async def update_property(
-    property_id: int, payload: PropertyUpdate, db: DbSession
-) -> PropertyOut:
+async def update_property(property_id: int, payload: PropertyUpdate, db: DbSession) -> PropertyOut:
     row = await property_service.update_property(db, property_id, payload)
     await db.commit()
     return PropertyOut.model_validate(row)
@@ -173,9 +187,11 @@ async def delete_property(
 ) -> None:
     await property_service.delete_property(db, property_id, purge=purge)
     await audit.record(
-        db, actor_id=admin.id,
+        db,
+        actor_id=admin.id,
         action="property.purge" if purge else "property.delete",
-        target_type="property", target_id=property_id,
+        target_type="property",
+        target_id=property_id,
         ip=request.client.host if request.client else None,
     )
     await db.commit()
@@ -187,8 +203,12 @@ async def restore_property(
 ) -> PropertyOut:
     row = await property_service.restore_property(db, property_id)
     await audit.record(
-        db, actor_id=admin.id, action="property.restore", target_type="property",
-        target_id=property_id, ip=request.client.host if request.client else None,
+        db,
+        actor_id=admin.id,
+        action="property.restore",
+        target_type="property",
+        target_id=property_id,
+        ip=request.client.host if request.client else None,
     )
     await db.commit()
     return PropertyOut.model_validate(row)
