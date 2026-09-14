@@ -381,3 +381,11 @@ Add these records to `zentbookings.com` DNS (Hostinger's panel has a one-click
 After they propagate, send a test with `uv run python scripts/test_email.py
 you@example.com` and check the received headers show `spf=pass` and `dkim=pass`.
 Move `p=none` → `p=quarantine` once you've confirmed nothing legit is failing.
+
+**Fallback provider:** Hostinger's SMTP has shown intermittent connect
+timeouts. `SMTPEmailSender` retries once against a second provider
+(`SMTP_FALLBACK_HOST`/`_PORT`/`_SECURITY`/`_USER`/`_PASSWORD`/`_FROM`) if the
+primary send raises — currently the Gmail account used before the Hostinger
+switch. The fallback sends from a different domain, so it won't have the
+same SPF/DKIM alignment; it's a delivery-reliability safety net, not a
+substitute for fixing the primary provider if it's failing often.

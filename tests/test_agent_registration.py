@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+from app.core.config import settings
 from app.services import nin_verification
 from app.services.nin_verification import NinResult, NinVerificationFailed
 
@@ -36,7 +37,9 @@ def fake_nin_fail(monkeypatch):
     monkeypatch.setattr(nin_verification, "verify_nin", verify)
 
 
-async def test_register_agent_without_provider_configured_is_503(client):
+async def test_register_agent_without_provider_configured_is_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "DOJAH_APP_ID", None)
+    monkeypatch.setattr(settings, "DOJAH_SECRET_KEY", None)
     res = await client.post("/api/auth/register-agent", json=_body())
     assert res.status_code == 503
     assert res.json()["error"]["code"] == "nin_not_configured"

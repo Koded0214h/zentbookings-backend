@@ -109,6 +109,16 @@ class Settings(BaseSettings):
     # "starttls" -> port 587, "ssl" -> port 465 (implicit TLS), "none" -> plaintext
     SMTP_SECURITY: str = "starttls"
 
+    # Optional second provider: tried only if the primary SMTP_* send raises.
+    # Guards against one provider's transient outages/timeouts (e.g. Hostinger)
+    # taking down all outbound mail.
+    SMTP_FALLBACK_HOST: str | None = None
+    SMTP_FALLBACK_PORT: int = 587
+    SMTP_FALLBACK_USER: str | None = None
+    SMTP_FALLBACK_PASSWORD: str | None = None
+    SMTP_FALLBACK_FROM: str | None = None  # defaults to SMTP_FROM if unset
+    SMTP_FALLBACK_SECURITY: str = "starttls"
+
     # --- Cloudinary (property media) --------------------------------------
     CLOUDINARY_CLOUD_NAME: str | None = None
     CLOUDINARY_API_KEY: str | None = None
@@ -164,6 +174,12 @@ class Settings(BaseSettings):
     @property
     def dojah_configured(self) -> bool:
         return bool(self.DOJAH_APP_ID and self.DOJAH_SECRET_KEY)
+
+    @property
+    def smtp_fallback_configured(self) -> bool:
+        return bool(
+            self.SMTP_FALLBACK_HOST and self.SMTP_FALLBACK_USER and self.SMTP_FALLBACK_PASSWORD
+        )
 
     @property
     def apple_configured(self) -> bool:
