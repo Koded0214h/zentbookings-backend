@@ -46,6 +46,7 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | `PLATFORM_FEE_PERCENT` | cut deducted before crediting a listing owner's wallet (default 10) |
 | `DOJAH_APP_ID` / `DOJAH_SECRET_KEY` | Dojah credentials for agent-signup NIN verification |
 | `DOJAH_BASE_URL` | `https://sandbox.dojah.io` for testing, `https://api.dojah.io` in production |
+| `RESEND_API_KEY` / `RESEND_FROM` | HTTPS email sending — preferred over SMTP in prod (Render blocks outbound SMTP ports) |
 | `REDIS_URL` | messaging pub/sub (Module 5.7); falls back to an in-process broker automatically if unset/unreachable |
 
 ## Endpoints (prefix `/api`)
@@ -389,3 +390,15 @@ primary send raises — currently the Gmail account used before the Hostinger
 switch. The fallback sends from a different domain, so it won't have the
 same SPF/DKIM alignment; it's a delivery-reliability safety net, not a
 substitute for fixing the primary provider if it's failing often.
+
+**Render (and most PaaS free/standard tiers) block outbound SMTP** — ports
+25/465/587 are blocked at the network level to stop spam abuse, so *neither*
+SMTP provider above can connect from Render regardless of credentials (both
+timing out identically is the signature of this, not two providers being
+down at once). `get_email_sender()` therefore prefers **Resend**
+(`RESEND_API_KEY` set) when `PROD=true` — it sends over HTTPS, which is never
+blocked — and only falls back to the SMTP chain if Resend isn't configured.
+Resend needs its own domain verification (`resend.com/domains` → add
+`zentbookings.com` → add the SPF/DKIM records it gives you to Hostinger's
+DNS) before it can send to anyone other than the Resend account's own email;
+test with `uv run python scripts/test_resend.py you@example.com`.

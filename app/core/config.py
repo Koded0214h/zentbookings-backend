@@ -119,6 +119,12 @@ class Settings(BaseSettings):
     SMTP_FALLBACK_FROM: str | None = None  # defaults to SMTP_FROM if unset
     SMTP_FALLBACK_SECURITY: str = "starttls"
 
+    # --- Resend (HTTPS email API) --------------------------------------------
+    # Preferred over raw SMTP when set: several hosts (Render included) block
+    # outbound SMTP ports on standard tiers, but HTTPS is always open.
+    RESEND_API_KEY: str | None = None
+    RESEND_FROM: str | None = None  # defaults to SMTP_FROM if unset
+
     # --- Cloudinary (property media) --------------------------------------
     CLOUDINARY_CLOUD_NAME: str | None = None
     CLOUDINARY_API_KEY: str | None = None
@@ -180,6 +186,10 @@ class Settings(BaseSettings):
         return bool(
             self.SMTP_FALLBACK_HOST and self.SMTP_FALLBACK_USER and self.SMTP_FALLBACK_PASSWORD
         )
+
+    @property
+    def resend_configured(self) -> bool:
+        return bool(self.RESEND_API_KEY)
 
     @property
     def apple_configured(self) -> bool:
