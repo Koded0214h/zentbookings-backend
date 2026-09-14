@@ -19,6 +19,7 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
     MessageResponse,
+    RegisterAgentRequest,
     RegisterRequest,
     RegisterResponse,
     ResendOtpRequest,
@@ -26,7 +27,7 @@ from app.schemas.auth import (
     UserOut,
     VerifyOtpRequest,
 )
-from app.services import auth_service, oauth
+from app.services import auth_service, nin_verification, oauth
 from app.services.email import EmailSender, get_email_sender
 from app.services.email import templates as tmpl
 
@@ -37,6 +38,7 @@ SenderDep = Annotated[EmailSender, Depends(get_email_sender)]
 
 _login_limit = Depends(rate_limit("login", settings.LOGIN_RATE_LIMIT))
 _register_limit = Depends(rate_limit("register", settings.REGISTER_RATE_LIMIT))
+_agent_register_limit = Depends(rate_limit("agent_register", settings.AGENT_REGISTER_RATE_LIMIT))
 _forgot_limit = Depends(rate_limit("forgot_password", settings.FORGOT_PASSWORD_RATE_LIMIT))
 _otp_verify_limit = Depends(rate_limit("otp_verify", settings.OTP_VERIFY_RATE_LIMIT))
 _otp_resend_limit = Depends(rate_limit("otp_resend", settings.OTP_RESEND_RATE_LIMIT))
@@ -94,6 +96,48 @@ async def register(
     )
     return RegisterResponse(
         message="Account created. Check your email for a verification code.",
+        email=user.email,
+        expires_in_seconds=settings.OTP_TTL_SECONDS,
+    )
+
+
+@router.post(
+    "/register-agent",
+    response_model=RegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_agent_register_limit],
+)
+async def register_agent(
+    payload: RegisterAgentRequest,
+    db: DbSession,
+    background: BackgroundTasks,
+    sender: SenderDep,
+) -> RegisterResponse:
+    """Agent sign-up: the NIN is verified with Dojah before any account is
+    created. A failed verification (not found, name mismatch, provider
+    error) leaves no trace — same OTP flow as normal registration once the
+    NIN checks out."""
+    result = await nin_verification.verify_nin(
+        payload.nin, first_name=payload.first_name, last_name=payload.last_name
+    )
+    user = await auth_service.register_agent_user(
+        db, payload, nin_verified_name=result.registered_name
+    )
+    raw_otp = await auth_service.issue_otp(db, user)
+    await db.commit()
+
+    background.add_task(
+        _send,
+        sender,
+        user.email,
+        tmpl.email_otp(
+            first_name=user.first_name,
+            code=raw_otp,
+            ttl_minutes=settings.OTP_TTL_SECONDS // 60,
+        ),
+    )
+    return RegisterResponse(
+        message="NIN verified. Check your email for a verification code.",
         email=user.email,
         expires_in_seconds=settings.OTP_TTL_SECONDS,
     )

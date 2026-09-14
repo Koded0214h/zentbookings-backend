@@ -26,12 +26,17 @@ from app.models.user import (
     TokenDenylist,
     User,
 )
-from app.schemas.auth import RegisterRequest
+from app.schemas.auth import RegisterAgentRequest, RegisterRequest
 
 
 class EmailNotVerified(AppError):
     def __init__(self) -> None:
         super().__init__(403, "email_unverified", "Please verify your email before signing in.")
+
+
+class NinAlreadyUsed(AppError):
+    def __init__(self) -> None:
+        super().__init__(409, "nin_exists", "This NIN is already associated with an account.")
 
 
 class OtpInvalid(AppError):
@@ -73,6 +78,32 @@ async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
         first_name=data.first_name.strip(),
         last_name=data.last_name.strip(),
         is_verified=False,  # PRD open item 9.2, decision: OTP verification required
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+async def register_agent_user(
+    db: AsyncSession, data: RegisterAgentRequest, *, nin_verified_name: str
+) -> User:
+    """Same contract as register_user, but the caller must have already
+    verified the NIN (see app.services.nin_verification) before calling this
+    — a failed verification should never reach here."""
+    if await get_user_by_email(db, data.email):
+        raise EmailAlreadyExists()
+    if await db.scalar(select(User).where(User.nin == data.nin)):
+        raise NinAlreadyUsed()
+    user = User(
+        email=normalize_email(data.email),
+        hashed_password=hash_password(data.password),
+        first_name=data.first_name.strip(),
+        last_name=data.last_name.strip(),
+        role="agent",
+        is_verified=False,  # still gated by the same OTP flow as everyone else
+        nin=data.nin,
+        nin_verified=True,
+        nin_verified_name=nin_verified_name,
     )
     db.add(user)
     await db.flush()

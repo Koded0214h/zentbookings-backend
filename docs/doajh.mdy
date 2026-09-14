@@ -1,0 +1,119 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.dojah.io/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Lookup NIN
+
+> Look up a Nigerian National Identity Number (NIN) and return the holder's identity record.
+
+<div className="dj-endpoint">
+  <span className={`dj-method dj-method-get`}>GET</span>
+  <code>/api/v1/kyc/nin</code>
+</div>
+
+Retrieve the identity record tied to a Nigerian National Identity Number (NIN) from NIMC.
+
+## Headers
+
+| Header          | Required | Description                                         |
+| --------------- | -------- | --------------------------------------------------- |
+| `Authorization` | Yes      | Your app's secret key, sent as-is — *not* `Bearer`. |
+| `AppId`         | Yes      | The App ID from your dashboard.                     |
+
+## Query parameters
+
+| Parameter | Type   | Required | Description                                |
+| --------- | ------ | -------- | ------------------------------------------ |
+| `nin`     | string | Yes      | A valid 11-digit National Identity Number. |
+
+## Response
+
+Returns an `entity` with the holder’s name, gender, date of birth, phone number, and a base64-encoded `photo`.
+
+## Other NIN lookups
+
+This endpoint is the **basic** tier. Two richer tiers return more of the NIMC record, and each is documented on its own page:
+
+| Tier                                                                    | Endpoint                      | What it adds                                                                                                    |
+| ----------------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Basic                                                                   | `GET /api/v1/kyc/nin`         | Names, gender, date of birth, phone number, photo.                                                              |
+| [Advanced](/api-reference/individual-verification/nigeria/advanced-nin) | `GET /api/v1/kyc/nin/advance` | Birth details, full residence and origin, and next of kin.                                                      |
+| [Premium](/api-reference/individual-verification/nigeria/premium-nin)   | `GET /api/v1/kyc/nin/premium` | Everything in Advanced, plus demographics, profession, previous name and address, height, title, and signature. |
+
+Advanced and Premium can both return the holder's tax details (`tax_id` and `tax_residency`) when you add `nin_tin=true` to the query.
+
+Each tier is billed separately — pick the smallest one that covers your use case. There is also [NIN Slip](/api-reference/individual-verification/nigeria/nin-slip) (`GET /api/v1/kyc/nin/nin_slip`), which returns the person’s NIN slip data.
+
+## Errors
+
+| Code  | Meaning                                                                                       |
+| ----- | --------------------------------------------------------------------------------------------- |
+| `400` | Bad request — a required parameter is missing or malformed.                                   |
+| `401` | Unauthorized — check your key and `AppId` (no `Bearer` prefix).                               |
+| `402` | Insufficient wallet balance. [Fund your wallet](/api-reference/core-concepts/wallet-billing). |
+| `404` | No record found for the supplied identifier.                                                  |
+| `424` | The upstream source was unavailable — retry shortly.                                          |
+| `429` | Too many requests — back off and retry.                                                       |
+
+## Sandbox
+
+Test with `nin=70123456789` against `https://sandbox.dojah.io`. See [Sandbox & test data](/api-reference/get-started/sandbox-test-data) for every test value.
+
+<RequestExample>
+  ```bash cURL theme={null}
+  curl --request GET \
+    "https://api.dojah.io/api/v1/kyc/nin?nin=70123456789" \
+    -H "Authorization: {{secret_key}}" \
+    -H "AppId: {{app_id}}"
+  ```
+
+  ```js Node.js theme={null}
+  const params = new URLSearchParams({
+    "nin": "70123456789",
+  });
+
+  const url = "https://api.dojah.io/api/v1/kyc/nin?" + params;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: process.env.DOJAH_SECRET_KEY,
+      AppId: process.env.DOJAH_APP_ID,
+    },
+  });
+  const data = await res.json();
+  ```
+
+  ```python Python theme={null}
+  import os, requests
+
+  res = requests.get(
+      "https://api.dojah.io/api/v1/kyc/nin",
+      headers={
+          "Authorization": os.environ["DOJAH_SECRET_KEY"],
+          "AppId": os.environ["DOJAH_APP_ID"],
+      },
+      params={ "nin": "70123456789" },
+  )
+  data = res.json()
+  ```
+</RequestExample>
+
+<ResponseExample>
+  ```json GET /api/v1/kyc/nin theme={null}
+  {
+    "entity": {
+      "first_name": "John",
+      "last_name": "Musa",
+      "gender": "Male",
+      "middle_name": "Doe",
+      "photo": "/9j/4AAQSkZJRgABAgAAAQABAAD/2wBD…",
+      "date_of_birth": "1982-01-01",
+      "phone_number": "08012345678",
+      "employment_status": "unemployment",
+      "marital_status": "Single"
+    }
+  }
+  ```
+</ResponseExample>
+
+
+

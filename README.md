@@ -44,12 +44,15 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | `ALLOWED_OAUTH_REDIRECT_HOSTS` | allowlist for the `redirect_uri` query param (open-redirect guard) |
 | `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` | Paystack test/live API keys — bookings payments |
 | `PLATFORM_FEE_PERCENT` | cut deducted before crediting a listing owner's wallet (default 10) |
+| `DOJAH_APP_ID` / `DOJAH_SECRET_KEY` | Dojah credentials for agent-signup NIN verification |
+| `DOJAH_BASE_URL` | `https://sandbox.dojah.io` for testing, `https://api.dojah.io` in production |
 | `REDIS_URL` | messaging pub/sub (Module 5.7); falls back to an in-process broker automatically if unset/unreachable |
 
 ## Endpoints (prefix `/api`)
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/auth/register` | – | Creates an **unverified** user, emails a 6-digit code, returns `{ message, email, expiresInSeconds }` — **no token yet**. Rate limited. |
+| POST | `/auth/register-agent` | – | Same as above, plus a `nin` field — verified with Dojah before the account is created. Rate limited. |
 | POST | `/auth/verify-otp` | – | `{ email, code }` → `{ token, user }` on success. Rate limited; locks after `OTP_MAX_ATTEMPTS`. |
 | POST | `/auth/resend-otp` | – | `{ email }` → always 202; issues a fresh code (old one invalidated) if the account exists and isn't verified yet. Rate limited. |
 | POST | `/auth/login` | – | `{ token, user }`. `403 email_unverified` if not yet verified. Rate limited. |
@@ -77,6 +80,21 @@ email_unverified`. OAuth sign-ups and admin-invited staff are exempt — their
 email is already provider/admin-verified. Existing accounts from before this
 change keep whatever `isVerified` value they had; nobody is retroactively
 locked out.
+
+### Agent sign-up (NIN verification)
+`POST /auth/register-agent` takes the same fields as `/auth/register` plus
+`nin` (exactly 11 digits) and creates the account with `role=agent`. Before
+anything is written to the database, the NIN is looked up against
+[Dojah](https://dojah.io)'s NIN endpoint (`GET /api/v1/kyc/nin`) and the
+returned registered name is compared against the submitted
+`firstName`/`lastName`. A `404` (no record), a name mismatch, or a bad NIN
+format all fail with `422 nin_verification_failed` and **no account is
+created** — safe to retry with corrected details. A NIN already tied to
+another account fails with `409 nin_exists`. Once the NIN checks out, the
+flow is identical to normal registration: OTP email, `POST
+/auth/verify-otp`, then sign in like any other account — no re-verification
+on login. Needs `DOJAH_APP_ID`/`DOJAH_SECRET_KEY`; the endpoint returns
+`503 nin_not_configured` without them.
 
 ## Properties (Module 2)
 | Method | Path | Auth | Purpose |

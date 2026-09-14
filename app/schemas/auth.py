@@ -18,6 +18,12 @@ def non_blank(v: str) -> str:
     return v.strip()
 
 
+def validate_nin_format(v: str) -> str:
+    if not v.isdigit():
+        raise ValueError("NIN must be exactly 11 digits")
+    return v
+
+
 class CamelModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -35,6 +41,14 @@ class RegisterRequest(CamelModel):
 
     _pw = field_validator("password")(validate_password_strength)
     _names = field_validator("first_name", "last_name")(non_blank)
+
+
+class RegisterAgentRequest(RegisterRequest):
+    """Same as RegisterRequest, plus the NIN we verify before the account exists."""
+
+    nin: str = Field(min_length=11, max_length=11)
+
+    _nin = field_validator("nin")(validate_nin_format)
 
 
 class LoginRequest(CamelModel):
@@ -70,6 +84,7 @@ class UserOut(CamelModel):
     last_name: str | None = None
     full_name: str | None = None
     avatar_url: str | None = None
+    role: str = "user"
     is_verified: bool = False
     created_at: datetime | None = None
 

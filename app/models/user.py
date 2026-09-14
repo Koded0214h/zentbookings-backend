@@ -52,6 +52,11 @@ class User(TimestampMixin, Base):
     last_login_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # NIN verification (agent sign-up only; NULL for regular users)
+    nin: Mapped[str | None] = mapped_column(String(11), unique=True, nullable=True)
+    nin_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    nin_verified_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     oauth_accounts: Mapped[list[OAuthAccount]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )

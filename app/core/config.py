@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     MESSAGE_SEND_RATE_LIMIT: str = "30/60"
     CONVERSATION_CREATE_RATE_LIMIT: str = "10/300"
 
+    # --- NIN verification (Dojah) — agent sign-up ---------------------------
+    DOJAH_APP_ID: str | None = None
+    DOJAH_SECRET_KEY: str | None = None
+    # sandbox.dojah.io for test credentials; api.dojah.io in production
+    DOJAH_BASE_URL: str = "https://sandbox.dojah.io"
+    AGENT_REGISTER_RATE_LIMIT: str = "5/300"
+
     # --- Derived helpers -----------------------------------------------------
     @property
     def cors_origins_list(self) -> list[str]:
@@ -153,6 +160,10 @@ class Settings(BaseSettings):
     @property
     def paystack_configured(self) -> bool:
         return bool(self.PAYSTACK_SECRET_KEY and self.PAYSTACK_PUBLIC_KEY)
+
+    @property
+    def dojah_configured(self) -> bool:
+        return bool(self.DOJAH_APP_ID and self.DOJAH_SECRET_KEY)
 
     @property
     def apple_configured(self) -> bool:
