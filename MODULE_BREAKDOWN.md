@@ -330,21 +330,20 @@ the existing Module 2 contract:
   SDK
 - `POST /payments/webhook/paystack` — verifies the Paystack signature
   (HMAC-SHA512 over the raw body vs. `x-paystack-signature`), marks the
-  booking `CONFIRMED`/paid, credits the property owner's wallet net of
-  `PLATFORM_FEE_PERCENT`, sends the `booking_confirmed` email; idempotent
+  booking `CONFIRMED`/paid, records the 70/30 escrow allocation, credits the
+  assigned agent's wallet with `AGENT_REVENUE_PERCENT`, sends the
+  `booking_confirmed` email; idempotent
   against Paystack's automatic retries; unknown references are a silent
   no-op (avoids retry storms)
-- Config: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PLATFORM_FEE_PERCENT`
+- Config: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `AGENT_REVENUE_PERCENT`
 
-### 5.4 Wallet & payouts — partially built (read path only)
+### 5.4 Wallet & payouts — built
 - `Wallet` (one per staff user): balance, currency
 - `WalletTransaction`: ledger entries — `CREDIT` on a settled booking
   payment, `DEBIT` on a payout, running `balance_after`
-- Built: `GET /staff/wallet` (own balance + recent transactions)
-- Not yet built: `GET /admin/wallets` (all wallets), `POST
-  /admin/wallets/{userId}/payout` (admin records a payout; real bank
-  transfer via Paystack's Transfers API is a later increment behind the
-  same interface)
+- Built: agent payout requests reserve wallet funds; admins can inspect all
+  wallets and escrow splits, approve a real Paystack Transfer, or reject and
+  refund a request. Transfer success/failure webhooks finalize or refund it.
 
 ### 5.5 Agent dashboard — built
 - `GET /agent/dashboard`: total listings, active bookings, total earnings

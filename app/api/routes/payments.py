@@ -9,7 +9,7 @@ from app.api.deps import DbSession
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.models.property import Property
-from app.services import payment_service, paystack
+from app.services import payment_service, paystack, wallet_service
 from app.services.email import EmailSender, get_email_sender
 from app.services.email import templates as tmpl
 
@@ -46,6 +46,15 @@ async def paystack_webhook(
     data = event.get("data") or {}
     reference = data.get("reference")
     if not reference:
+        return {"received": True}
+
+    if event.get("event") in ("transfer.success", "transfer.failed", "transfer.reversed"):
+        await wallet_service.process_transfer_event(
+            db,
+            reference=reference,
+            succeeded=event.get("event") == "transfer.success",
+        )
+        await db.commit()
         return {"received": True}
 
     payment = await payment_service.get_payment_by_reference(db, reference)

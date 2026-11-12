@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.models.booking import Booking, Payment
+from app.models.booking import Booking, EscrowAllocation, Payment
+from app.models.staff import PropertyAgent
+from app.models.user import User
 from app.services import paystack, wallet_service
 
 
@@ -55,15 +57,47 @@ async def mark_paid_and_settle(db: AsyncSession, payment: Payment, event_data: d
         from app.models.property import Property
 
         prop = await db.get(Property, booking.property_id)
-        if prop is not None and prop.created_by_id:
-            fee = round(booking.total_amount * settings.PLATFORM_FEE_PERCENT / 100)
-            net = booking.total_amount - fee
+        agent_id = await db.scalar(
+            select(PropertyAgent.agent_id)
+            .join(User, User.id == PropertyAgent.agent_id)
+            .where(
+                PropertyAgent.property_id == booking.property_id,
+                User.role == "agent",
+                User.is_active.is_(True),
+            )
+            .order_by(PropertyAgent.created_at.asc(), PropertyAgent.agent_id.asc())
+            .limit(1)
+        )
+        if agent_id is None and prop is not None and prop.created_by_id:
+            creator = await db.get(User, prop.created_by_id)
+            if creator is not None and creator.role in ("agent", "admin") and creator.is_active:
+                agent_id = creator.id
+
+        if agent_id is not None:
+            percent = settings.AGENT_REVENUE_PERCENT
+            agent_amount = round(booking.total_amount * percent / 100)
+            platform_amount = booking.total_amount - agent_amount
+            db.add(
+                EscrowAllocation(
+                    payment_id=payment.id,
+                    booking_id=booking.id,
+                    agent_id=agent_id,
+                    gross_amount=booking.total_amount,
+                    agent_amount=agent_amount,
+                    platform_amount=platform_amount,
+                    agent_percent=percent,
+                    currency=booking.currency,
+                )
+            )
             await wallet_service.credit(
                 db,
-                prop.created_by_id,
-                net,
+                agent_id,
+                agent_amount,
                 booking_id=booking.id,
-                note=f"Booking {booking.confirmation_code} ({booking.total_amount} - {fee} fee)",
+                note=(
+                    f"Booking {booking.confirmation_code}: {percent}% agent share "
+                    f"of {booking.total_amount}"
+                ),
             )
 
     await db.flush()

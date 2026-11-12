@@ -93,7 +93,7 @@ class BlockedDatesResponse(CamelModel):
 
 class WalletTransactionOut(CamelModel):
     id: str
-    type: Literal["CREDIT", "DEBIT"]
+    type: Literal["CREDIT", "DEBIT", "REFUND"]
     amount: int
     balance_after: int
     booking_id: str | None = None

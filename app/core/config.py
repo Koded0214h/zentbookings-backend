@@ -134,7 +134,9 @@ class Settings(BaseSettings):
     # --- Paystack (bookings payments) ---------------------------------------
     PAYSTACK_SECRET_KEY: str | None = None
     PAYSTACK_PUBLIC_KEY: str | None = None
-    PLATFORM_FEE_PERCENT: float = 10.0
+    # Agent receives this share; the remainder is retained in platform escrow/revenue.
+    AGENT_REVENUE_PERCENT: int = 70
+    PLATFORM_FEE_PERCENT: float = 30.0  # deprecated compatibility setting
     BOOKING_CREATE_RATE_LIMIT: str = "5/300"      # bookings per client IP
     BOOKING_LOOKUP_RATE_LIMIT: str = "10/300"
     BOOKING_PAYMENT_TIMEOUT_MINUTES: int = 30     # unpaid bookings auto-cancel after this
@@ -202,6 +204,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _guard_prod(self) -> Settings:
+        if not 0 <= self.AGENT_REVENUE_PERCENT <= 100:
+            raise ValueError("AGENT_REVENUE_PERCENT must be between 0 and 100")
         if self.PROD:
             if self.SECRET_KEY == _DEV_SECRET:
                 raise ValueError("SECRET_KEY must be set to a strong value when PROD=true")

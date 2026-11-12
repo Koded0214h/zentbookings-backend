@@ -211,3 +211,53 @@ class StaffSettingsUpdate(CamelModel):
     payout_account_number: str | None = Field(default=None, max_length=20)
     payout_account_name: str | None = Field(default=None, max_length=120)
     timezone: str | None = Field(default=None, max_length=60)
+
+
+# --- Escrow and payouts ---------------------------------------------------
+class PayoutCreate(CamelModel):
+    amount: int = Field(gt=0)
+
+
+class PayoutReview(CamelModel):
+    decision: Literal["approve", "reject"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class PayoutOut(CamelModel):
+    id: str
+    agent_id: str
+    amount: int
+    currency: str
+    status: Literal["PENDING", "APPROVED", "DISBURSED", "REJECTED", "FAILED"]
+    bank_code: str
+    bank_name: str
+    account_number: str
+    account_name: str
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    admin_note: str | None = None
+    transfer_reference: str | None = None
+    created_at: datetime
+
+    @field_serializer("created_at", "reviewed_at", when_used="json")
+    def _ser_payout_dt(self, v: datetime | None) -> str | None:
+        return _iso_z(v)
+
+
+class EscrowAllocationOut(CamelModel):
+    id: str
+    payment_id: str
+    booking_id: str
+    agent_id: str
+    gross_amount: int
+    agent_amount: int
+    platform_amount: int
+    agent_percent: int
+    currency: str
+    created_at: datetime
+
+
+class AdminWalletOut(CamelModel):
+    user_id: str
+    balance: int
+    currency: str

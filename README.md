@@ -43,7 +43,7 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | `FRONTEND_BASE_URL` | where OAuth returns the user with `?token=` |
 | `ALLOWED_OAUTH_REDIRECT_HOSTS` | allowlist for the `redirect_uri` query param (open-redirect guard) |
 | `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` | Paystack test/live API keys — bookings payments |
-| `PLATFORM_FEE_PERCENT` | cut deducted before crediting a listing owner's wallet (default 10) |
+| `AGENT_REVENUE_PERCENT` | agent share of each settled booking (default 70; platform retains the remainder) |
 | `DOJAH_APP_ID` / `DOJAH_SECRET_KEY` | Dojah credentials for agent-signup NIN verification |
 | `DOJAH_BASE_URL` | `https://sandbox.dojah.io` for testing, `https://api.dojah.io` in production |
 | `RESEND_API_KEY` / `RESEND_FROM` | HTTPS email sending — preferred over SMTP in prod (Render blocks outbound SMTP ports) |
@@ -232,6 +232,11 @@ appointments in Module 3. Payment processor is **Paystack**.
 | GET | `/payments/config` | – | `{ publicKey }` for the Paystack frontend SDK |
 | POST | `/payments/webhook/paystack` | signature | Paystack event webhook |
 | GET | `/staff/wallet` | staff | Own wallet balance + recent transactions |
+| GET/POST | `/staff/wallet/payouts` | staff | List payout requests / reserve available balance and request payout |
+| GET | `/admin/wallets` | admin | All agent wallet balances |
+| GET | `/admin/escrow` | admin | Immutable gross, agent, and platform split records |
+| GET | `/admin/payouts` | admin | List payout requests; supports `?status=` |
+| PATCH | `/admin/payouts/{id}` | admin | Approve (initiate Paystack Transfer) or reject a payout |
 
 `POST /bookings` body: `propertyId`, `guestName`/`guestEmail`/`guestPhone`
 (required for guests, auto-filled from the account otherwise), `checkIn`/
@@ -251,18 +256,24 @@ auto-cancels unpaid bookings older than `BOOKING_PAYMENT_TIMEOUT_MINUTES`
 **Payments:** `POST /bookings` initializes a Paystack transaction (amount in
 kobo) and returns `authorizationUrl` for the frontend to redirect to. The
 webhook verifies `x-paystack-signature` (HMAC-SHA512 over the raw body) and,
-on `charge.success`, marks the booking `CONFIRMED`, credits the listing
-owner's wallet net of `PLATFORM_FEE_PERCENT` (default 10%), and emails a
-booking-confirmed notice. Idempotent against Paystack's automatic webhook
-retries; unknown references are a silent `200 { received: true }` no-op.
+on `charge.success`, marks the booking `CONFIRMED`, records an immutable
+70/30 escrow allocation, credits the assigned agent's wallet with the
+`AGENT_REVENUE_PERCENT` share (default 70%), and emails a booking-confirmed
+notice. The earliest active assigned agent is the revenue recipient; the
+staff creator is the fallback when no agent is assigned. Settlement is
+idempotent against Paystack's automatic webhook retries; unknown references
+are a silent `200 { received: true }` no-op.
 Needs `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY`; the create-booking flow
 returns `503 payment_not_configured` without them.
 
-**Wallet:** one ledger per staff user (`Wallet` balance + immutable
-`WalletTransaction` rows with a running `balanceAfter`). Payouts and a
-separate admin-wide wallet view are not built yet (Module 5.4 follow-up) —
-`GET /agent/dashboard` below already surfaces platform-wide totals for
-admins.
+**Wallet and payouts:** one ledger per staff user (`Wallet` balance +
+immutable `WalletTransaction` rows with a running `balanceAfter`). A payout
+request atomically reserves the requested balance. Admin approval creates a
+Paystack transfer recipient and initiates a transfer from the platform
+balance. `transfer.success` marks it `DISBURSED`; failed/reversed transfers
+are marked `FAILED` and automatically refunded to the internal wallet.
+Admin rejection likewise returns the reserved balance. Bank details are
+snapshotted onto each request so later settings changes cannot redirect it.
 
 ## Agent Dashboard, Settings & Messaging (Module 5.5–5.7)
 

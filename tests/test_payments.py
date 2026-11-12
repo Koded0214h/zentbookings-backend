@@ -101,7 +101,7 @@ async def test_webhook_charge_success_confirms_booking_and_credits_wallet(
     assert confirmed.json()["status"] == "CONFIRMED"
 
     wallet = await client.get("/api/staff/wallet", headers=admin_auth)
-    expected_net = total - round(total * settings.PLATFORM_FEE_PERCENT / 100)
+    expected_net = round(total * settings.AGENT_REVENUE_PERCENT / 100)
     assert wallet.json()["balance"] == expected_net
     assert wallet.json()["transactions"][0]["type"] == "CREDIT"
 

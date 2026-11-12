@@ -13,6 +13,8 @@ from app.schemas.staff import (
     AttendanceOut,
     AttendanceStatusOut,
     ClockInRequest,
+    PayoutCreate,
+    PayoutOut,
     StaffSettingsOut,
     StaffSettingsUpdate,
 )
@@ -96,6 +98,23 @@ async def get_my_wallet(db: DbSession, user: StaffUser) -> WalletOut:
         currency=wallet.currency,
         transactions=[WalletTransactionOut.model_validate(t) for t in transactions],
     )
+
+
+@router.get("/wallet/payouts", response_model=list[PayoutOut])
+async def get_my_payouts(db: DbSession, user: StaffUser) -> list[PayoutOut]:
+    rows = await wallet_service.list_payouts(db, user_id=user.id)
+    return [PayoutOut.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/wallet/payouts", response_model=PayoutOut, status_code=status.HTTP_201_CREATED
+)
+async def create_payout(
+    payload: PayoutCreate, db: DbSession, user: StaffUser
+) -> PayoutOut:
+    row = await wallet_service.request_payout(db, user.id, payload.amount)
+    await db.commit()
+    return PayoutOut.model_validate(row)
 
 
 @router.get("/settings", response_model=StaffSettingsOut)

@@ -7,10 +7,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, DbSession
+from app.models.booking import EscrowAllocation, Wallet
 from app.models.staff import AuditLog
 from app.schemas.staff import (
     AdminUserListResponse,
     AdminUserOut,
+    AdminWalletOut,
     AgentInvite,
     AgentProfileOut,
     AgentProfileUpdate,
@@ -22,11 +24,14 @@ from app.schemas.staff import (
     AttendanceSummaryRow,
     AuditEntryOut,
     AuditListResponse,
+    EscrowAllocationOut,
+    PayoutOut,
+    PayoutReview,
     PropertyAgentsOut,
     RoleUpdate,
     StatusUpdate,
 )
-from app.services import attendance_service, audit, staff_service
+from app.services import attendance_service, audit, staff_service, wallet_service
 from app.services.attendance_service import AttendanceFilters
 from app.services.email import EmailSender, get_email_sender
 from app.services.email import templates as tmpl
@@ -38,6 +43,59 @@ SenderDep = Annotated[EmailSender, Depends(get_email_sender)]
 
 def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+# ---------------- escrow, wallets & payout approvals ----------------
+@router.get("/wallets", response_model=list[AdminWalletOut])
+async def list_wallets(db: DbSession, _admin: AdminUser) -> list[AdminWalletOut]:
+    rows = await db.scalars(select(Wallet).order_by(Wallet.updated_at.desc()))
+    return [AdminWalletOut.model_validate(row) for row in rows.all()]
+
+
+@router.get("/escrow", response_model=list[EscrowAllocationOut])
+async def list_escrow(db: DbSession, _admin: AdminUser) -> list[EscrowAllocationOut]:
+    rows = await db.scalars(
+        select(EscrowAllocation).order_by(EscrowAllocation.created_at.desc())
+    )
+    return [EscrowAllocationOut.model_validate(row) for row in rows.all()]
+
+
+@router.get("/payouts", response_model=list[PayoutOut])
+async def list_payout_requests(
+    db: DbSession,
+    _admin: AdminUser,
+    status_: Annotated[str | None, Query(alias="status")] = None,
+) -> list[PayoutOut]:
+    rows = await wallet_service.list_payouts(db, status=status_)
+    return [PayoutOut.model_validate(row) for row in rows]
+
+
+@router.patch("/payouts/{payout_id}", response_model=PayoutOut)
+async def review_payout_request(
+    payout_id: str,
+    payload: PayoutReview,
+    db: DbSession,
+    admin: AdminUser,
+    request: Request,
+) -> PayoutOut:
+    row = await wallet_service.review_payout(
+        db,
+        payout_id,
+        admin_id=admin.id,
+        approve=payload.decision == "approve",
+        note=payload.note,
+    )
+    await audit.record(
+        db,
+        actor_id=admin.id,
+        action=f"payout.{row.status.lower()}",
+        target_type="payout",
+        target_id=row.id,
+        metadata={"amount": row.amount, "agentId": row.agent_id},
+        ip=_ip(request),
+    )
+    await db.commit()
+    return PayoutOut.model_validate(row)
 
 
 # ---------------- users & roles ----------------

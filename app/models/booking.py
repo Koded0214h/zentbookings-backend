@@ -20,7 +20,8 @@ from app.models.user import TimestampMixin, _utcnow, gen_id
 BOOKING_STATUSES = ("PENDING_PAYMENT", "CONFIRMED", "ACTIVE", "COMPLETED", "CANCELLED")
 ACTIVE_BOOKING_STATUSES = ("CONFIRMED", "ACTIVE")  # these actually block a date range
 PAYMENT_STATUSES = ("PENDING", "SUCCESS", "FAILED")
-WALLET_TX_TYPES = ("CREDIT", "DEBIT")
+WALLET_TX_TYPES = ("CREDIT", "DEBIT", "REFUND")
+PAYOUT_STATUSES = ("PENDING", "APPROVED", "DISBURSED", "REJECTED", "FAILED")
 
 
 class Booking(TimestampMixin, Base):
@@ -110,3 +111,49 @@ class WalletTransaction(TimestampMixin, Base):
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class EscrowAllocation(TimestampMixin, Base):
+    """Immutable revenue split captured when a Paystack charge settles."""
+
+    __tablename__ = "escrow_allocations"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: gen_id("esc"))
+    payment_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("payments.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    booking_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("bookings.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    agent_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("users.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    gross_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    platform_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="NGN", nullable=False)
+
+
+class PayoutRequest(TimestampMixin, Base):
+    __tablename__ = "payout_requests"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: gen_id("pot"))
+    agent_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("users.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="NGN", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
+    bank_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    bank_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    admin_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    transfer_reference: Mapped[str | None] = mapped_column(
+        String(120), unique=True, index=True, nullable=True
+    )
