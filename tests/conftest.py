@@ -7,6 +7,9 @@ os.environ["PROD"] = "false"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_URL"] = ""
 os.environ["LOG_FORMAT"] = "text"
+os.environ["CLOUDINARY_CLOUD_NAME"] = "test-cloud"
+os.environ["CLOUDINARY_API_KEY"] = "test-key"
+os.environ["CLOUDINARY_API_SECRET"] = "test-secret"
 
 import pytest
 import pytest_asyncio
