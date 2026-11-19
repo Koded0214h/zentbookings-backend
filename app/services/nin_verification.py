@@ -1,7 +1,7 @@
-"""NIN (Nigerian National Identity Number) verification via Dojah.
+"""NIN (Nigerian National Identity Number) verification via Ninja.
 
 Used once, at agent sign-up: the applicant submits their NIN alongside the
-usual registration fields, we look it up with Dojah, and the account is
+usual registration fields, we verify it with Ninja, and the account is
 only created if the record is found *and* the registered name matches what
 they submitted. Regular user sign-up never touches this.
 """
@@ -42,31 +42,41 @@ class NinResult:
     reference: str
 
 
-def _normalize(name: str) -> set[str]:
-    return {tok for tok in re.sub(r"[^a-z\s]", "", name.lower()).split() if tok}
-
-
-def _names_match(registered: str, submitted_first: str, submitted_last: str) -> bool:
-    tokens = _normalize(registered)
-    return submitted_first.strip().lower() in tokens and submitted_last.strip().lower() in tokens
-
-
 def _headers() -> dict[str, str]:
-    return {"AppId": settings.DOJAH_APP_ID or "", "Authorization": settings.DOJAH_SECRET_KEY or ""}
+    return {
+        "Authorization": f"Bearer {settings.NINJA_SECRET_KEY or ''}",
+        "Content-Type": "application/json",
+    }
+
+
+def _base_url() -> str:
+    if settings.NINJA_BASE_URL:
+        return settings.NINJA_BASE_URL.rstrip("/")
+    key = settings.NINJA_SECRET_KEY or ""
+    if key.startswith("sk_sandbox_"):
+        return "https://api.sandbox.ninja.boucloud.io"
+    return "https://api.ninja.boucloud.io"
 
 
 async def verify_nin(nin: str, *, first_name: str, last_name: str) -> NinResult:
     if not NIN_PATTERN.match(nin):
         raise NinVerificationFailed("NIN must be exactly 11 digits.")
-    if not settings.dojah_configured:
+    if not settings.ninja_configured:
         raise NinNotConfigured()
 
+    payload = {
+        "idType": "nin",
+        "mode": "verify",
+        "idNumber": nin,
+        "firstName": first_name.strip(),
+        "lastName": last_name.strip(),
+    }
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            res = await client.get(
-                f"{settings.DOJAH_BASE_URL}/api/v1/kyc/nin",
-                params={"nin": nin},
+            res = await client.post(
+                f"{_base_url()}/api/identity/identify",
                 headers=_headers(),
+                json=payload,
             )
         except httpx.HTTPError as exc:
             raise NinProviderError() from exc
@@ -75,16 +85,16 @@ async def verify_nin(nin: str, *, first_name: str, last_name: str) -> NinResult:
     if res.status_code == 404:
         raise NinVerificationFailed("No record found for that NIN.")
     if res.status_code >= 400:
-        raise NinProviderError(body.get("error") or f"NIN lookup failed ({res.status_code})")
-
-    entity = body.get("entity") or {}
-    registered_name = " ".join(
-        part for part in (entity.get("first_name"), entity.get("last_name")) if part
-    ).strip()
-    if not registered_name:
+        message = body.get("message") if isinstance(body, dict) else None
+        raise NinProviderError(message or f"NIN verification failed ({res.status_code})")
+    if not isinstance(body, dict):
         raise NinProviderError("Unexpected response from the identity provider.")
-    if not _names_match(registered_name, first_name, last_name):
+    if body.get("found") is False:
+        raise NinVerificationFailed("No record found for that NIN.")
+    if body.get("verified") is not True or body.get("recommendation") != "accept":
         raise NinVerificationFailed(
             "The name on this NIN record doesn't match the name you entered."
         )
-    return NinResult(registered_name=registered_name, reference=str(entity.get("nin") or nin))
+    registered_name = f"{first_name.strip()} {last_name.strip()}"
+    reference = body.get("request_id") or body.get("requestId") or ""
+    return NinResult(registered_name=registered_name, reference=str(reference))

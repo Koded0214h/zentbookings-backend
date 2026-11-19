@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os
+
+# Tests must never inherit live services from a developer's ignored .env file.
+os.environ["PROD"] = "false"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["REDIS_URL"] = ""
+os.environ["LOG_FORMAT"] = "text"
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -21,6 +29,15 @@ def _reset_rate_limiter():
     metrics.reset()
     yield
     limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def _test_bachs_settings(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PAYMENT_PROVIDER", "bachs")
+    monkeypatch.setattr(settings, "BACHS_API_KEY", "sk_sandbox_test")
+    monkeypatch.setattr(settings, "BACHS_WEBHOOK_SECRET", "whsec_test")
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 

@@ -27,7 +27,7 @@ class BookingCreate(CamelModel):
     check_out: date
     guests: int = Field(default=1, ge=1, le=100)
     notes: str | None = Field(default=None, max_length=2000)
-    # where Paystack sends the browser back after checkout; defaults to FRONTEND_BASE_URL
+    # where the hosted provider sends the browser after checkout; defaults to FRONTEND_BASE_URL
     redirect_url: str | None = None
 
 

@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pytest
 from conftest import sample_property
 
-from app.services import paystack
+from app.services.payment_providers import bachs
 
 
 def _dates(days_ahead: int = 3, nights: int = 2) -> tuple[str, str]:
@@ -15,15 +15,16 @@ def _dates(days_ahead: int = 3, nights: int = 2) -> tuple[str, str]:
 
 
 @pytest.fixture
-def fake_paystack_for_dashboard(monkeypatch):
-    async def init(*, email, amount_naira, reference, callback_url, metadata=None):
+def fake_bachs_for_dashboard(monkeypatch):
+    async def init(**kwargs):
+        reference = kwargs["reference"]
         return {
-            "authorization_url": f"https://checkout.paystack.com/{reference}",
-            "access_code": "code123",
+            "authorization_url": f"https://checkout.bachs.io/{reference}",
             "reference": reference,
+            "provider_id": "chk_test",
         }
 
-    monkeypatch.setattr(paystack, "initialize_transaction", init)
+    monkeypatch.setattr(bachs.provider, "initialize_payment", init)
 
 
 async def test_staff_settings_defaults_and_update(client, agent_auth):
@@ -86,7 +87,7 @@ async def test_dashboard_scoped_to_assigned_properties_for_agent(client, admin_a
 
 
 async def test_dashboard_reflects_wallet_after_settlement(
-    client, admin_auth, session_factory, fake_paystack_for_dashboard
+    client, admin_auth, session_factory, fake_bachs_for_dashboard
 ):
     pid = (
         await client.post("/api/properties", json=sample_property(), headers=admin_auth)
@@ -108,16 +109,27 @@ async def test_dashboard_reflects_wallet_after_settlement(
     import hashlib
     import hmac
     import json as _json
+    import time
 
     from app.core.config import settings
 
-    body = {"event": "charge.success", "data": {"reference": reference, "status": "success"}}
+    total = created.json()["booking"]["totalAmount"]
+    body = {
+        "type": "collection.succeeded",
+        "data": {"reference": reference, "amount": f"{total}.00", "currency": "NGN"},
+    }
     raw = _json.dumps(body).encode()
-    sig = hmac.new(settings.PAYSTACK_SECRET_KEY.encode(), raw, hashlib.sha512).hexdigest()
+    timestamp = str(int(time.time()))
+    sig = hmac.new(
+        settings.BACHS_WEBHOOK_SECRET.encode(), timestamp.encode() + b"." + raw, hashlib.sha256
+    ).hexdigest()
     await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=raw,
-        headers={"content-type": "application/json", "x-paystack-signature": sig},
+        headers={
+            "content-type": "application/json",
+            "x-bachs-signature-v2": f"t={timestamp},v1={sig}",
+        },
     )
 
     dash = await client.get("/api/agent/dashboard", headers=admin_auth)

@@ -42,18 +42,18 @@ Local Postgres instead of Neon: `docker compose up -d db` and point
 | `GOOGLE_REDIRECT_URI` | backend callback, must match GCP exactly |
 | `FRONTEND_BASE_URL` | where OAuth returns the user with `?token=` |
 | `ALLOWED_OAUTH_REDIRECT_HOSTS` | allowlist for the `redirect_uri` query param (open-redirect guard) |
-| `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` | Paystack test/live API keys — bookings payments |
+| `PAYMENT_PROVIDER` | Payment adapter selector; currently `bachs` |
+| `BACHS_API_KEY` / `BACHS_WEBHOOK_SECRET` | Bachs sandbox/live API key and environment-matched webhook signing secret |
 | `AGENT_REVENUE_PERCENT` | agent share of each settled booking (default 70; platform retains the remainder) |
-| `DOJAH_APP_ID` / `DOJAH_SECRET_KEY` | Dojah credentials for agent-signup NIN verification |
-| `DOJAH_BASE_URL` | `https://sandbox.dojah.io` for testing, `https://api.dojah.io` in production |
-| `RESEND_API_KEY` / `RESEND_FROM` | HTTPS email sending — preferred over SMTP in prod (Render blocks outbound SMTP ports) |
+| `NINJA_SECRET_KEY` | Ninja server secret for agent-signup NIN verification; key prefix selects sandbox/live |
+| `NINJA_BASE_URL` | Optional test-proxy override; normally leave unset |
 | `REDIS_URL` | messaging pub/sub (Module 5.7); falls back to an in-process broker automatically if unset/unreachable |
 
 ## Endpoints (prefix `/api`)
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/auth/register` | – | Creates an **unverified** user, emails a 6-digit code, returns `{ message, email, expiresInSeconds }` — **no token yet**. Rate limited. |
-| POST | `/auth/register-agent` | – | Same as above, plus a `nin` field — verified with Dojah before the account is created. Rate limited. |
+| POST | `/auth/register-agent` | – | Same as above, plus a `nin` field — verified with Ninja before the account is created. Rate limited. |
 | POST | `/auth/verify-otp` | – | `{ email, code }` → `{ token, user }` on success. Rate limited; locks after `OTP_MAX_ATTEMPTS`. |
 | POST | `/auth/resend-otp` | – | `{ email }` → always 202; issues a fresh code (old one invalidated) if the account exists and isn't verified yet. Rate limited. |
 | POST | `/auth/login` | – | `{ token, user }`. `403 email_unverified` if not yet verified. Rate limited. |
@@ -85,16 +85,15 @@ locked out.
 ### Agent sign-up (NIN verification)
 `POST /auth/register-agent` takes the same fields as `/auth/register` plus
 `nin` (exactly 11 digits) and creates the account with `role=agent`. Before
-anything is written to the database, the NIN is looked up against
-[Dojah](https://dojah.io)'s NIN endpoint (`GET /api/v1/kyc/nin`) and the
-returned registered name is compared against the submitted
-`firstName`/`lastName`. A `404` (no record), a name mismatch, or a bad NIN
+anything is written to the database, Ninja verifies the NIN and submitted
+`firstName`/`lastName` using `POST /api/identity/identify` in verify mode.
+A missing record, a name mismatch, or a bad NIN
 format all fail with `422 nin_verification_failed` and **no account is
 created** — safe to retry with corrected details. A NIN already tied to
 another account fails with `409 nin_exists`. Once the NIN checks out, the
 flow is identical to normal registration: OTP email, `POST
 /auth/verify-otp`, then sign in like any other account — no re-verification
-on login. Needs `DOJAH_APP_ID`/`DOJAH_SECRET_KEY`; the endpoint returns
+on login. Needs `NINJA_SECRET_KEY`; the endpoint returns
 `503 nin_not_configured` without them.
 
 ## Properties (Module 2)
@@ -218,30 +217,30 @@ per `LAST_SEEN_THROTTLE_SECONDS` (900). Visible in the admin user views only.
 ## Bookings, Payments & Wallet (Module 5.1–5.4)
 
 Paid short-let bookings — a separate concept from the free Tour viewing
-appointments in Module 3. Payment processor is **Paystack**.
+appointments in Module 3. Payment processor is **Bachs**.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/bookings` | optional | Create a `PENDING_PAYMENT` booking + initialize a Paystack transaction. Rate-limited (`BOOKING_CREATE_RATE_LIMIT`). |
+| POST | `/bookings` | optional | Create a `PENDING_PAYMENT` booking + initialize a Bachs hosted checkout. Rate-limited (`BOOKING_CREATE_RATE_LIMIT`). |
 | GET | `/bookings` | Bearer | Own bookings; staff see all + `?status=`/`?propertyId=` filters. Paginated. |
 | GET | `/bookings/{id}` | Bearer | Owner or staff (`403` otherwise) |
 | DELETE | `/bookings/{id}` | Bearer | Staff cancel (audited) |
 | POST | `/bookings/lookup` | – | Guest self-service: `{ confirmationCode, email }` → booking. Rate-limited (`BOOKING_LOOKUP_RATE_LIMIT`). |
 | POST | `/bookings/cancel` | – | Guest cancel by `{ confirmationCode, email }` |
 | GET | `/properties/{id}/blocked-dates` | – | Confirmed date ranges for a booking calendar |
-| GET | `/payments/config` | – | `{ publicKey }` for the Paystack frontend SDK |
-| POST | `/payments/webhook/paystack` | signature | Paystack event webhook |
+| GET | `/payments/config` | – | Active hosted-checkout provider and currency |
+| POST | `/payments/webhook/bachs` | signature | Bachs collection and payout webhook |
 | GET | `/staff/wallet` | staff | Own wallet balance + recent transactions |
 | GET/POST | `/staff/wallet/payouts` | staff | List payout requests / reserve available balance and request payout |
 | GET | `/admin/wallets` | admin | All agent wallet balances |
 | GET | `/admin/escrow` | admin | Immutable gross, agent, and platform split records |
 | GET | `/admin/payouts` | admin | List payout requests; supports `?status=` |
-| PATCH | `/admin/payouts/{id}` | admin | Approve (initiate Paystack Transfer) or reject a payout |
+| PATCH | `/admin/payouts/{id}` | admin | Approve (initiate Bachs payout) or reject a payout |
 
 `POST /bookings` body: `propertyId`, `guestName`/`guestEmail`/`guestPhone`
 (required for guests, auto-filled from the account otherwise), `checkIn`/
 `checkOut` (YYYY-MM-DD), `guests?`, `notes?`, `redirectUrl?` (validated
-against the same host allowlist as OAuth, used as the Paystack callback
+against the same host allowlist as OAuth, used as the Bachs return URL
 URL). Response: `{ booking: {...}, payment: { reference, authorizationUrl } }`.
 Pricing is snapshotted onto the booking at creation time (`pricePerNight`,
 `cleaningFee`, `securityDeposit`, `subtotal`, `totalAmount`) so later
@@ -253,27 +252,34 @@ dates, so an abandoned checkout can't lock a listing. The maintenance loop
 auto-cancels unpaid bookings older than `BOOKING_PAYMENT_TIMEOUT_MINUTES`
 (default 30).
 
-**Payments:** `POST /bookings` initializes a Paystack transaction (amount in
-kobo) and returns `authorizationUrl` for the frontend to redirect to. The
-webhook verifies `x-paystack-signature` (HMAC-SHA512 over the raw body) and,
-on `charge.success`, marks the booking `CONFIRMED`, records an immutable
+**Payments:** `POST /bookings` initializes a Bachs raw-price checkout and
+returns `authorizationUrl` for the frontend to redirect to. The webhook
+verifies Bachs HMAC-SHA256 V2 signatures with replay protection and, on
+`collection.succeeded`, validates the amount/currency, marks the booking
+`CONFIRMED`, and records an immutable
 70/30 escrow allocation, credits the assigned agent's wallet with the
 `AGENT_REVENUE_PERCENT` share (default 70%), and emails a booking-confirmed
 notice. The earliest active assigned agent is the revenue recipient; the
 staff creator is the fallback when no agent is assigned. Settlement is
-idempotent against Paystack's automatic webhook retries; unknown references
+idempotent against Bachs webhook retries; unknown references
 are a silent `200 { received: true }` no-op.
-Needs `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY`; the create-booking flow
-returns `503 payment_not_configured` without them.
+Needs `BACHS_API_KEY` and a matching `BACHS_WEBHOOK_SECRET`.
 
 **Wallet and payouts:** one ledger per staff user (`Wallet` balance +
 immutable `WalletTransaction` rows with a running `balanceAfter`). A payout
 request atomically reserves the requested balance. Admin approval creates a
-Paystack transfer recipient and initiates a transfer from the platform
-balance. `transfer.success` marks it `DISBURSED`; failed/reversed transfers
+Bachs payout destination and initiates a payout from the platform balance.
+Destinations awaiting Bachs approval return a retryable conflict; approved
+destinations are reused. `payout.paid` marks the request `DISBURSED`; failed payouts
 are marked `FAILED` and automatically refunded to the internal wallet.
 Admin rejection likewise returns the reserved balance. Bank details are
 snapshotted onto each request so later settings changes cannot redirect it.
+
+For an intentionally guarded live checkout test, set `BACHS_API_KEY` in your
+shell (never in source control), then run `python scripts/test_bachs_live.py
+--amount 1000 --email ... --name ... --phone ... --return-url https://...
+--confirm-live`. Creating the URL moves no money; money moves only when the
+hosted checkout is completed.
 
 ## Agent Dashboard, Settings & Messaging (Module 5.5–5.7)
 
@@ -402,14 +408,5 @@ switch. The fallback sends from a different domain, so it won't have the
 same SPF/DKIM alignment; it's a delivery-reliability safety net, not a
 substitute for fixing the primary provider if it's failing often.
 
-**Render (and most PaaS free/standard tiers) block outbound SMTP** — ports
-25/465/587 are blocked at the network level to stop spam abuse, so *neither*
-SMTP provider above can connect from Render regardless of credentials (both
-timing out identically is the signature of this, not two providers being
-down at once). `get_email_sender()` therefore prefers **Resend**
-(`RESEND_API_KEY` set) when `PROD=true` — it sends over HTTPS, which is never
-blocked — and only falls back to the SMTP chain if Resend isn't configured.
-Resend needs its own domain verification (`resend.com/domains` → add
-`zentbookings.com` → add the SPF/DKIM records it gives you to Hostinger's
-DNS) before it can send to anyone other than the Resend account's own email;
-test with `uv run python scripts/test_resend.py you@example.com`.
+Production email uses SMTP directly. Verify outbound STARTTLS on port 587 from
+the deployment host before launch.

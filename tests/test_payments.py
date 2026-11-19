@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from datetime import date, timedelta
 
 import pytest
 from conftest import sample_property
 
 from app.core.config import settings
-from app.services import paystack
+from app.services.payment_providers import bachs
 
 
 def _dates(days_ahead: int = 3, nights: int = 2) -> tuple[str, str]:
@@ -20,51 +21,57 @@ def _dates(days_ahead: int = 3, nights: int = 2) -> tuple[str, str]:
 
 def _sign(body: dict) -> tuple[bytes, str]:
     raw = json.dumps(body).encode()
-    sig = hmac.new(settings.PAYSTACK_SECRET_KEY.encode(), raw, hashlib.sha512).hexdigest()
-    return raw, sig
+    timestamp = str(int(time.time()))
+    sig = hmac.new(
+        settings.BACHS_WEBHOOK_SECRET.encode(), timestamp.encode() + b"." + raw, hashlib.sha256
+    ).hexdigest()
+    return raw, f"t={timestamp},v1={sig}"
 
 
 @pytest.fixture
-def fake_paystack(monkeypatch):
-    async def init(*, email, amount_naira, reference, callback_url, metadata=None):
+def fake_bachs(monkeypatch):
+    async def init(**kwargs):
+        reference = kwargs["reference"]
         return {
-            "authorization_url": f"https://checkout.paystack.com/{reference}",
-            "access_code": "code123",
+            "authorization_url": f"https://checkout.bachs.io/{reference}",
             "reference": reference,
+            "provider_id": "chk_test",
         }
 
-    monkeypatch.setattr(paystack, "initialize_transaction", init)
+    monkeypatch.setattr(bachs.provider, "initialize_payment", init)
 
 
-async def test_payment_config_exposes_public_key(client):
+async def test_payment_config_exposes_provider(client):
     res = await client.get("/api/payments/config")
     assert res.status_code == 200
-    assert res.json()["publicKey"] == settings.PAYSTACK_PUBLIC_KEY
+    assert res.json() == {"provider": "bachs", "currency": "NGN"}
 
 
 async def test_webhook_rejects_bad_signature(client):
-    body = {"event": "charge.success", "data": {"reference": "does-not-matter"}}
+    body = {"type": "collection.succeeded", "data": {"reference": "does-not-matter"}}
     res = await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=json.dumps(body).encode(),
-        headers={"content-type": "application/json", "x-paystack-signature": "bogus"},
+        headers={"content-type": "application/json", "x-bachs-signature": "bogus"},
     )
     assert res.status_code == 401
 
 
 async def test_webhook_unknown_reference_is_noop(client):
-    raw, sig = _sign({"event": "charge.success", "data": {"reference": "not-a-real-one"}})
+    raw, sig = _sign(
+        {"type": "collection.succeeded", "data": {"reference": "not-a-real-one"}}
+    )
     res = await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=raw,
-        headers={"content-type": "application/json", "x-paystack-signature": sig},
+        headers={"content-type": "application/json", "x-bachs-signature-v2": sig},
     )
     assert res.status_code == 200
     assert res.json() == {"received": True}
 
 
 async def test_webhook_charge_success_confirms_booking_and_credits_wallet(
-    client, admin_auth, fake_paystack, session_factory
+    client, admin_auth, fake_bachs, session_factory
 ):
     pid = (await client.post("/api/properties", json=sample_property(), headers=admin_auth)).json()[
         "id"
@@ -88,12 +95,20 @@ async def test_webhook_charge_success_confirms_booking_and_credits_wallet(
     total = body["booking"]["totalAmount"]
 
     raw, sig = _sign(
-        {"event": "charge.success", "data": {"reference": reference, "status": "success"}}
+        {
+            "type": "collection.succeeded",
+            "data": {
+                "reference": reference,
+                "status": "SUCCEEDED",
+                "amount": f"{total}.00",
+                "currency": "NGN",
+            },
+        }
     )
     res = await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=raw,
-        headers={"content-type": "application/json", "x-paystack-signature": sig},
+        headers={"content-type": "application/json", "x-bachs-signature-v2": sig},
     )
     assert res.status_code == 200
 
@@ -106,7 +121,7 @@ async def test_webhook_charge_success_confirms_booking_and_credits_wallet(
     assert wallet.json()["transactions"][0]["type"] == "CREDIT"
 
 
-async def test_webhook_is_idempotent(client, admin_auth, fake_paystack):
+async def test_webhook_is_idempotent(client, admin_auth, fake_bachs):
     pid = (await client.post("/api/properties", json=sample_property(), headers=admin_auth)).json()[
         "id"
     ]
@@ -123,14 +138,18 @@ async def test_webhook_is_idempotent(client, admin_auth, fake_paystack):
         },
     )
     reference = created.json()["payment"]["reference"]
-    event = {"event": "charge.success", "data": {"reference": reference, "status": "success"}}
+    total = created.json()["booking"]["totalAmount"]
+    event = {
+        "type": "collection.succeeded",
+        "data": {"reference": reference, "amount": f"{total}.00", "currency": "NGN"},
+    }
 
     for _ in range(2):
         raw, sig = _sign(event)
         res = await client.post(
-            "/api/payments/webhook/paystack",
+            "/api/payments/webhook/bachs",
             content=raw,
-            headers={"content-type": "application/json", "x-paystack-signature": sig},
+            headers={"content-type": "application/json", "x-bachs-signature-v2": sig},
         )
         assert res.status_code == 200
 
@@ -138,7 +157,7 @@ async def test_webhook_is_idempotent(client, admin_auth, fake_paystack):
     assert len(wallet.json()["transactions"]) == 1  # only credited once
 
 
-async def test_webhook_charge_failed_marks_payment_failed(client, admin_auth, fake_paystack):
+async def test_webhook_charge_failed_marks_payment_failed(client, admin_auth, fake_bachs):
     pid = (await client.post("/api/properties", json=sample_property(), headers=admin_auth)).json()[
         "id"
     ]
@@ -157,11 +176,11 @@ async def test_webhook_charge_failed_marks_payment_failed(client, admin_auth, fa
     booking_id = created.json()["booking"]["id"]
     reference = created.json()["payment"]["reference"]
 
-    raw, sig = _sign({"event": "charge.failed", "data": {"reference": reference}})
+    raw, sig = _sign({"type": "collection.failed", "data": {"reference": reference}})
     res = await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=raw,
-        headers={"content-type": "application/json", "x-paystack-signature": sig},
+        headers={"content-type": "application/json", "x-bachs-signature-v2": sig},
     )
     assert res.status_code == 200
 

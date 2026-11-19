@@ -8,7 +8,8 @@ from app.core.exceptions import AppError
 from app.models.booking import Booking, EscrowAllocation, Payment
 from app.models.staff import PropertyAgent
 from app.models.user import User
-from app.services import paystack, wallet_service
+from app.services import wallet_service
+from app.services.payment_providers import get_payment_provider
 
 
 class PaymentNotFound(AppError):
@@ -18,8 +19,11 @@ class PaymentNotFound(AppError):
 
 async def initiate_payment(db: AsyncSession, booking: Booking, *, redirect_url: str) -> dict:
     reference = f"{booking.id}-{booking.confirmation_code}".lower()
-    result = await paystack.initialize_transaction(
+    provider = get_payment_provider()
+    result = await provider.initialize_payment(
         email=booking.guest_email,
+        name=booking.guest_name,
+        phone=booking.guest_phone,
         amount_naira=booking.total_amount,
         reference=reference,
         callback_url=redirect_url,
@@ -28,7 +32,7 @@ async def initiate_payment(db: AsyncSession, booking: Booking, *, redirect_url: 
     db.add(
         Payment(
             booking_id=booking.id,
-            provider="paystack",
+            provider=provider.name,
             reference=result["reference"],
             amount=booking.total_amount,
             currency=booking.currency,
@@ -102,6 +106,20 @@ async def mark_paid_and_settle(db: AsyncSession, payment: Payment, event_data: d
 
     await db.flush()
     return booking
+
+
+def validate_settlement(payment: Payment, event_data: dict) -> None:
+    """Never fulfil a booking if the provider reports a different amount/currency."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        amount = Decimal(str(event_data.get("amount")))
+    except (InvalidOperation, TypeError):
+        raise AppError(
+            400, "invalid_payment_amount", "Payment amount is missing or invalid."
+        ) from None
+    if amount != Decimal(payment.amount) or event_data.get("currency") != payment.currency:
+        raise AppError(409, "payment_amount_mismatch", "Payment amount or currency does not match.")
 
 
 async def mark_failed(db: AsyncSession, payment: Payment, event_data: dict) -> None:

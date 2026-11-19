@@ -1,0 +1,68 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: zent-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check app tests
+      - run: uv run pytest -q
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build --tag zentbookings-backend:latest .
+
+      - name: Bundle image
+        run: docker save zentbookings-backend:latest | gzip -1 > zent-api.tar.gz
+
+      - name: Configure deployment SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/zent_deploy
+          chmod 600 ~/.ssh/zent_deploy
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload bundle
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/zent_deploy "$VPS_USER@$VPS_HOST" \
+            'mkdir -p /home/kodedlabs/zentbookings/incoming'
+          scp -i ~/.ssh/zent_deploy zent-api.tar.gz compose.prod.yml deploy/deploy.sh \
+            "$VPS_USER@$VPS_HOST:/home/kodedlabs/zentbookings/incoming/"
+
+      - name: Activate release
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/zent_deploy "$VPS_USER@$VPS_HOST" '
+            set -eu
+            cd /home/kodedlabs/zentbookings
+            mv incoming/compose.prod.yml compose.prod.yml
+            mv incoming/deploy.sh deploy.sh
+            chmod 700 deploy.sh
+            ./deploy.sh
+          '

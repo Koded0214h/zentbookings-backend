@@ -3,9 +3,9 @@
 > Derived from [`PRODUCT_REQUIREMENTS.md`](./PRODUCT_REQUIREMENTS.md) v1.0
 > Purpose: decompose the backend into top-level modules, each with submodules,
 > so work can be split, estimated, and owned independently.
-> Modules 1–5 are built. Listings, bookings, Paystack payments, wallet,
+> Modules 1–5 are built. Listings, bookings, Bachs payments, wallet,
 > agent dashboard, agent settings, and Redis-backed messaging are all live
-> and verified against Neon (+ real Paystack test-mode API for payments).
+> and verified against Neon (+ Bachs sandbox API for payments).
 
 ---
 
@@ -17,7 +17,7 @@
 | 2 | **Property Catalogue** | Storing, curating, searching and serving property listings + media | 3.1–3.3, 4.2, 4.4 (Property), 6.1 |
 | 3 | **Tour Booking** | Scheduling, confirming and notifying property tours | 3.3 (Tour Modal), 4.3, 4.4 (TourBooking), 6.3 |
 | 4 | **Staff, Roles & Attendance** | Role split (user / agent / admin), user administration, agent assignment, staff clock-in/out, login & presence tracking, audit log | 2.2 (Agent persona), 2.3, — (extends 4.1/4.4) |
-| 5 | **Bookings, Payments & Agent Dashboard** | Paid short-let bookings (separate from free Tours), Paystack payments, agent wallet/payouts, dashboard analytics, agent settings, Redis-backed messaging | — (new; not in original PRD) |
+| 5 | **Bookings, Payments & Agent Dashboard** | Paid short-let bookings (separate from free Tours), Bachs payments, agent wallet/payouts, dashboard analytics, agent settings, Redis-backed messaging | — (new; not in original PRD) |
 
 Cross-cutting concerns (CORS, HTTPS, config, error envelope, rate limiting,
 observability) are shared infrastructure consumed by every module — noted
@@ -281,12 +281,12 @@ Modules 2 and 3; hangs an auto clock-out sweep off the Module 3 maintenance loop
 ## Module 5 — Bookings, Payments & Agent Dashboard
 
 > **Status: 5.1–5.7 built and live-verified** against Neon (+ the real
-> Paystack test-mode API for payments): listings, bookings, Paystack
+> Bachs sandbox API for payments): listings, bookings, Bachs
 > payments, wallet, agent dashboard, agent settings, and Redis-backed
 > messaging (with a graceful in-process fallback when Redis isn't running).
 > Decisions taken: **Bookings are a new, separate concept from Tours**
 > (Tours stay free viewing appointments, untouched). Payment processor is
-> **Paystack**. Messaging is **Redis-backed**.
+> **Bachs**. Messaging is **Redis-backed**.
 
 ### 5.1 Listing details (extends Property) — built
 The "Add New Listing" wizard needs fields the current `Property` model
@@ -313,7 +313,7 @@ the existing Module 2 contract:
   sweep (`expire_unpaid`, `BOOKING_PAYMENT_TIMEOUT_MINUTES`, default 30)
   auto-cancels stale unpaid bookings
 - Endpoints: `POST /bookings` (creates a `PENDING_PAYMENT` booking +
-  initializes a Paystack transaction, returns booking + payment
+  initializes a Bachs checkout, returns booking + payment
   authorizationUrl), `GET /bookings` (self-scoped for users, all for
   staff), `GET /bookings/{id}` (owner/staff only, 403 otherwise),
   `DELETE /bookings/{id}` (staff cancel, audited), `POST /bookings/lookup`
@@ -321,28 +321,27 @@ the existing Module 2 contract:
   `GET /properties/{id}/blocked-dates` (public, returns confirmed date
   ranges for a calendar UI)
 
-### 5.3 Payments (Paystack) — built
+### 5.3 Payments (Bachs) — built
 - `Payment`: `id`, `booking_id`, `provider`, `reference`, `amount`,
   `currency`, `status`, raw webhook payload, timestamps
-- `POST /bookings` → initializes a Paystack transaction, returns
+- `POST /bookings` → initializes a Bachs hosted checkout, returns
   `authorizationUrl` for the frontend to redirect to checkout
-- `GET /payments/config` — exposes `PAYSTACK_PUBLIC_KEY` for the frontend
-  SDK
-- `POST /payments/webhook/paystack` — verifies the Paystack signature
-  (HMAC-SHA512 over the raw body vs. `x-paystack-signature`), marks the
+- `GET /payments/config` — exposes the active hosted-checkout provider
+- `POST /payments/webhook/bachs` — verifies the timestamped Bachs signature
+  (HMAC-SHA256 over timestamp + raw body), validates amount/currency, marks the
   booking `CONFIRMED`/paid, records the 70/30 escrow allocation, credits the
   assigned agent's wallet with `AGENT_REVENUE_PERCENT`, sends the
   `booking_confirmed` email; idempotent
-  against Paystack's automatic retries; unknown references are a silent
+  against Bachs retries; unknown references are a silent
   no-op (avoids retry storms)
-- Config: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `AGENT_REVENUE_PERCENT`
+- Config: `PAYMENT_PROVIDER`, `BACHS_API_KEY`, `BACHS_WEBHOOK_SECRET`, `AGENT_REVENUE_PERCENT`
 
 ### 5.4 Wallet & payouts — built
 - `Wallet` (one per staff user): balance, currency
 - `WalletTransaction`: ledger entries — `CREDIT` on a settled booking
   payment, `DEBIT` on a payout, running `balance_after`
 - Built: agent payout requests reserve wallet funds; admins can inspect all
-  wallets and escrow splits, approve a real Paystack Transfer, or reject and
+  wallets and escrow splits, approve a real Bachs payout, or reject and
   refund a request. Transfer success/failure webhooks finalize or refund it.
 
 ### 5.5 Agent dashboard — built
@@ -359,7 +358,7 @@ the existing Module 2 contract:
 - `GET/PUT /staff/settings`: notification preferences
   (`notifyNewBooking`/`notifyNewMessage`), payout bank details
   (`payoutBankCode`/`payoutBankName`/`payoutAccountNumber`/
-  `payoutAccountName` — needed for a future Paystack Transfers payout),
+  `payoutAccountName` — used to create/reuse a Bachs payout destination),
   `timezone`
 
 ### 5.7 Messaging (Redis-backed) — built

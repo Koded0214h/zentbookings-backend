@@ -3,31 +3,33 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from datetime import date, timedelta
 
 import pytest
 from conftest import sample_property
 
 from app.core.config import settings
-from app.services import paystack
+from app.services.payment_providers import bachs
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True)
-def fake_paystack(monkeypatch):
+def fake_bachs(monkeypatch):
     async def init(**kwargs):
         return {
-            "authorization_url": f"https://checkout.paystack.com/{kwargs['reference']}",
+            "authorization_url": f"https://checkout.bachs.io/{kwargs['reference']}",
             "reference": kwargs["reference"],
+            "provider_id": "chk_test",
         }
 
-    monkeypatch.setattr(paystack, "initialize_transaction", init)
+    monkeypatch.setattr(bachs.provider, "initialize_payment", init)
 
     async def transfer(**kwargs):
         return {"reference": kwargs["reference"], "status": "success"}
 
-    monkeypatch.setattr(paystack, "disburse_to_bank", transfer)
+    monkeypatch.setattr(bachs.provider, "disburse_to_bank", transfer)
 
 
 def _dates() -> tuple[str, str]:
@@ -35,15 +37,24 @@ def _dates() -> tuple[str, str]:
     return start.isoformat(), (start + timedelta(days=3)).isoformat()
 
 
-def _signed_success(reference: str) -> tuple[bytes, str]:
+def _signed_success(reference: str, amount: int) -> tuple[bytes, str]:
     raw = json.dumps(
-        {"event": "charge.success", "data": {"reference": reference, "status": "success"}},
+        {
+            "type": "collection.succeeded",
+            "data": {
+                "reference": reference,
+                "status": "SUCCEEDED",
+                "amount": f"{amount}.00",
+                "currency": "NGN",
+            },
+        },
         separators=(",", ":"),
     ).encode()
+    timestamp = str(int(time.time()))
     signature = hmac.new(
-        settings.PAYSTACK_SECRET_KEY.encode(), raw, hashlib.sha512
+        settings.BACHS_WEBHOOK_SECRET.encode(), timestamp.encode() + b"." + raw, hashlib.sha256
     ).hexdigest()
-    return raw, signature
+    return raw, f"t={timestamp},v1={signature}"
 
 
 async def _settle_assigned_agent_booking(client, admin_auth, agent_auth) -> tuple[int, int]:
@@ -73,11 +84,13 @@ async def _settle_assigned_agent_booking(client, admin_auth, agent_auth) -> tupl
     )
     assert booking.status_code == 201, booking.text
     body = booking.json()
-    raw, signature = _signed_success(body["payment"]["reference"])
+    raw, signature = _signed_success(
+        body["payment"]["reference"], body["booking"]["totalAmount"]
+    )
     webhook = await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=raw,
-        headers={"content-type": "application/json", "x-paystack-signature": signature},
+        headers={"content-type": "application/json", "x-bachs-signature-v2": signature},
     )
     assert webhook.status_code == 200, webhook.text
     return body["booking"]["totalAmount"], property_id
@@ -133,18 +146,22 @@ async def test_70_30_split_and_admin_approved_payout(
 
     raw = json.dumps(
         {
-            "event": "transfer.success",
-            "data": {"reference": f"zent-{payout_id}", "status": "success"},
+            "type": "payout.paid",
+            "data": {"reference": f"zent-{payout_id}", "status": "completed"},
         },
         separators=(",", ":"),
     ).encode()
+    timestamp = str(int(time.time()))
     signature = hmac.new(
-        settings.PAYSTACK_SECRET_KEY.encode(), raw, hashlib.sha512
+        settings.BACHS_WEBHOOK_SECRET.encode(), timestamp.encode() + b"." + raw, hashlib.sha256
     ).hexdigest()
     transfer_webhook = await client.post(
-        "/api/payments/webhook/paystack",
+        "/api/payments/webhook/bachs",
         content=raw,
-        headers={"content-type": "application/json", "x-paystack-signature": signature},
+        headers={
+            "content-type": "application/json",
+            "x-bachs-signature-v2": f"t={timestamp},v1={signature}",
+        },
     )
     assert transfer_webhook.status_code == 200
     payouts = await client.get("/api/staff/wallet/payouts", headers=agent_auth["headers"])

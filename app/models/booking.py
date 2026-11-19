@@ -69,7 +69,7 @@ class Payment(TimestampMixin, Base):
     booking_id: Mapped[str] = mapped_column(
         String(40), ForeignKey("bookings.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    provider: Mapped[str] = mapped_column(String(20), default="paystack", nullable=False)
+    provider: Mapped[str] = mapped_column(String(20), default="bachs", nullable=False)
     reference: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="NGN", nullable=False)
@@ -114,7 +114,7 @@ class WalletTransaction(TimestampMixin, Base):
 
 
 class EscrowAllocation(TimestampMixin, Base):
-    """Immutable revenue split captured when a Paystack charge settles."""
+    """Immutable revenue split captured when a provider charge settles."""
 
     __tablename__ = "escrow_allocations"
 

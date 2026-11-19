@@ -119,21 +119,18 @@ class Settings(BaseSettings):
     SMTP_FALLBACK_FROM: str | None = None  # defaults to SMTP_FROM if unset
     SMTP_FALLBACK_SECURITY: str = "starttls"
 
-    # --- Resend (HTTPS email API) --------------------------------------------
-    # Preferred over raw SMTP when set: several hosts (Render included) block
-    # outbound SMTP ports on standard tiers, but HTTPS is always open.
-    RESEND_API_KEY: str | None = None
-    RESEND_FROM: str | None = None  # defaults to SMTP_FROM if unset
-
     # --- Cloudinary (property media) --------------------------------------
     CLOUDINARY_CLOUD_NAME: str | None = None
     CLOUDINARY_API_KEY: str | None = None
     CLOUDINARY_API_SECRET: str | None = None
     CLOUDINARY_UPLOAD_FOLDER: str = "zent/properties"
 
-    # --- Paystack (bookings payments) ---------------------------------------
-    PAYSTACK_SECRET_KEY: str | None = None
-    PAYSTACK_PUBLIC_KEY: str | None = None
+    # --- Payment provider (bookings + payouts) -------------------------------
+    PAYMENT_PROVIDER: str = "bachs"
+    BACHS_API_KEY: str | None = None
+    BACHS_WEBHOOK_SECRET: str | None = None
+    # Normally inferred from the key prefix; override only for a proxy/test server.
+    BACHS_BASE_URL: str | None = None
     # Agent receives this share; the remainder is retained in platform escrow/revenue.
     AGENT_REVENUE_PERCENT: int = 70
     PLATFORM_FEE_PERCENT: float = 30.0  # deprecated compatibility setting
@@ -146,11 +143,10 @@ class Settings(BaseSettings):
     MESSAGE_SEND_RATE_LIMIT: str = "30/60"
     CONVERSATION_CREATE_RATE_LIMIT: str = "10/300"
 
-    # --- NIN verification (Dojah) — agent sign-up ---------------------------
-    DOJAH_APP_ID: str | None = None
-    DOJAH_SECRET_KEY: str | None = None
-    # sandbox.dojah.io for test credentials; api.dojah.io in production
-    DOJAH_BASE_URL: str = "https://sandbox.dojah.io"
+    # --- NIN verification (Ninja) — agent sign-up ---------------------------
+    NINJA_SECRET_KEY: str | None = None
+    # Inferred from the key prefix when unset; override only for a test proxy.
+    NINJA_BASE_URL: str | None = None
     AGENT_REGISTER_RATE_LIMIT: str = "5/300"
 
     # --- Derived helpers -----------------------------------------------------
@@ -176,22 +172,18 @@ class Settings(BaseSettings):
         )
 
     @property
-    def paystack_configured(self) -> bool:
-        return bool(self.PAYSTACK_SECRET_KEY and self.PAYSTACK_PUBLIC_KEY)
+    def bachs_configured(self) -> bool:
+        return bool(self.BACHS_API_KEY)
 
     @property
-    def dojah_configured(self) -> bool:
-        return bool(self.DOJAH_APP_ID and self.DOJAH_SECRET_KEY)
+    def ninja_configured(self) -> bool:
+        return bool(self.NINJA_SECRET_KEY)
 
     @property
     def smtp_fallback_configured(self) -> bool:
         return bool(
             self.SMTP_FALLBACK_HOST and self.SMTP_FALLBACK_USER and self.SMTP_FALLBACK_PASSWORD
         )
-
-    @property
-    def resend_configured(self) -> bool:
-        return bool(self.RESEND_API_KEY)
 
     @property
     def apple_configured(self) -> bool:
@@ -204,6 +196,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _guard_prod(self) -> Settings:
+        if self.PAYMENT_PROVIDER not in {"bachs"}:
+            raise ValueError("PAYMENT_PROVIDER must be 'bachs'")
         if not 0 <= self.AGENT_REVENUE_PERCENT <= 100:
             raise ValueError("AGENT_REVENUE_PERCENT must be between 0 and 100")
         if self.PROD:

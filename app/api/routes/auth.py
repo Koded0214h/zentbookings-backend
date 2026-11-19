@@ -113,7 +113,7 @@ async def register_agent(
     background: BackgroundTasks,
     sender: SenderDep,
 ) -> RegisterResponse:
-    """Agent sign-up: the NIN is verified with Dojah before any account is
+    """Agent sign-up: the NIN and submitted name are verified with Ninja before any account is
     created. A failed verification (not found, name mismatch, provider
     error) leaves no trace — same OTP flow as normal registration once the
     NIN checks out."""

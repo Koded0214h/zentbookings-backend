@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.models.booking import PayoutRequest, Wallet, WalletTransaction
 from app.models.staff import StaffSettings
-from app.services import paystack
+from app.services.payment_providers import get_payment_provider
 
 
 async def get_or_create_wallet(db: AsyncSession, user_id: str) -> Wallet:
@@ -126,7 +126,7 @@ async def review_payout(
     if row.status != "PENDING":
         raise AppError(409, "payout_already_reviewed", "Payout request was already reviewed.")
     if approve and not transfer_reference:
-        transfer = await paystack.disburse_to_bank(
+        transfer = await get_payment_provider().disburse_to_bank(
             amount_naira=row.amount,
             account_name=row.account_name,
             account_number=row.account_number,
@@ -136,7 +136,7 @@ async def review_payout(
         )
         transfer_reference = transfer.get("reference") or transfer.get("transfer_code")
         if not transfer_reference:
-            raise AppError(502, "paystack_error", "Transfer response had no reference.")
+            raise AppError(502, "bachs_error", "Payout response had no reference.")
     row.status = "APPROVED" if approve else "REJECTED"
     row.reviewed_by = admin_id
     row.reviewed_at = datetime.now(UTC)
