@@ -8,6 +8,7 @@ from math import ceil
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AppError
 from app.models.booking import ACTIVE_BOOKING_STATUSES, Booking
 from app.models.property import Property
@@ -103,7 +104,9 @@ async def create_booking(
         raise DatesUnavailable()
 
     subtotal = prop.price * nights
-    total = subtotal + prop.cleaning_fee + prop.security_deposit
+    base_amount = subtotal + prop.cleaning_fee + prop.security_deposit
+    processing_fee = (base_amount * settings.PROCESSING_FEE_PERCENT + 50) // 100
+    total = base_amount + processing_fee
 
     booking = Booking(
         property_id=prop.id,
@@ -119,6 +122,7 @@ async def create_booking(
         cleaning_fee=prop.cleaning_fee,
         security_deposit=prop.security_deposit,
         subtotal=subtotal,
+        processing_fee=processing_fee,
         total_amount=total,
         currency="NGN",
         status="PENDING_PAYMENT",

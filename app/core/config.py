@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     BACHS_BASE_URL: str | None = None
     # Agent receives this share; the remainder is retained in platform escrow/revenue.
     AGENT_REVENUE_PERCENT: int = 70
+    # Added to the guest's charge; excluded from the base used for the 70/30 split.
+    PROCESSING_FEE_PERCENT: int = 2
     PLATFORM_FEE_PERCENT: float = 30.0  # deprecated compatibility setting
     BOOKING_CREATE_RATE_LIMIT: str = "5/300"      # bookings per client IP
     BOOKING_LOOKUP_RATE_LIMIT: str = "10/300"
@@ -200,6 +202,8 @@ class Settings(BaseSettings):
             raise ValueError("PAYMENT_PROVIDER must be 'bachs'")
         if not 0 <= self.AGENT_REVENUE_PERCENT <= 100:
             raise ValueError("AGENT_REVENUE_PERCENT must be between 0 and 100")
+        if not 0 <= self.PROCESSING_FEE_PERCENT <= 100:
+            raise ValueError("PROCESSING_FEE_PERCENT must be between 0 and 100")
         if self.PROD:
             if self.SECRET_KEY == _DEV_SECRET:
                 raise ValueError("SECRET_KEY must be set to a strong value when PROD=true")

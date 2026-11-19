@@ -46,6 +46,7 @@ class BookingOut(CamelModel):
     cleaning_fee: int
     security_deposit: int
     subtotal: int
+    processing_fee: int
     total_amount: int
     currency: str
     status: Status

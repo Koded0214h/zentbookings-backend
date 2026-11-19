@@ -79,7 +79,8 @@ async def mark_paid_and_settle(db: AsyncSession, payment: Payment, event_data: d
 
         if agent_id is not None:
             percent = settings.AGENT_REVENUE_PERCENT
-            agent_amount = round(booking.total_amount * percent / 100)
+            revenue_base = booking.total_amount - booking.processing_fee
+            agent_amount = round(revenue_base * percent / 100)
             platform_amount = booking.total_amount - agent_amount
             db.add(
                 EscrowAllocation(
@@ -87,6 +88,7 @@ async def mark_paid_and_settle(db: AsyncSession, payment: Payment, event_data: d
                     booking_id=booking.id,
                     agent_id=agent_id,
                     gross_amount=booking.total_amount,
+                    processing_fee=booking.processing_fee,
                     agent_amount=agent_amount,
                     platform_amount=platform_amount,
                     agent_percent=percent,
@@ -100,7 +102,7 @@ async def mark_paid_and_settle(db: AsyncSession, payment: Payment, event_data: d
                 booking_id=booking.id,
                 note=(
                     f"Booking {booking.confirmation_code}: {percent}% agent share "
-                    f"of {booking.total_amount}"
+                    f"of {revenue_base}; processing fee excluded"
                 ),
             )
 

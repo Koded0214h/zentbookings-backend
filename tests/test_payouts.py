@@ -57,7 +57,9 @@ def _signed_success(reference: str, amount: int) -> tuple[bytes, str]:
     return raw, f"t={timestamp},v1={signature}"
 
 
-async def _settle_assigned_agent_booking(client, admin_auth, agent_auth) -> tuple[int, int]:
+async def _settle_assigned_agent_booking(
+    client, admin_auth, agent_auth
+) -> tuple[int, int, int]:
     prop = await client.post(
         "/api/properties",
         json=sample_property(price=500_000, period="Per Night", category="Shortlet"),
@@ -93,14 +95,21 @@ async def _settle_assigned_agent_booking(client, admin_auth, agent_auth) -> tupl
         headers={"content-type": "application/json", "x-bachs-signature-v2": signature},
     )
     assert webhook.status_code == 200, webhook.text
-    return body["booking"]["totalAmount"], property_id
+    return (
+        body["booking"]["totalAmount"],
+        body["booking"]["processingFee"],
+        property_id,
+    )
 
 
 async def test_70_30_split_and_admin_approved_payout(
     client, admin_auth, agent_auth
 ):
-    total, _ = await _settle_assigned_agent_booking(client, admin_auth, agent_auth)
-    agent_share = round(total * 70 / 100)
+    total, processing_fee, _ = await _settle_assigned_agent_booking(
+        client, admin_auth, agent_auth
+    )
+    revenue_base = total - processing_fee
+    agent_share = round(revenue_base * 70 / 100)
 
     wallet = await client.get("/api/staff/wallet", headers=agent_auth["headers"])
     assert wallet.json()["balance"] == agent_share
@@ -109,6 +118,7 @@ async def test_70_30_split_and_admin_approved_payout(
     allocation = escrow.json()[0]
     assert allocation["agentId"] == agent_auth["id"]
     assert allocation["grossAmount"] == total
+    assert allocation["processingFee"] == processing_fee
     assert allocation["agentAmount"] == agent_share
     assert allocation["platformAmount"] == total - agent_share
 
@@ -169,8 +179,10 @@ async def test_70_30_split_and_admin_approved_payout(
 
 
 async def test_rejected_payout_returns_reserved_funds(client, admin_auth, agent_auth):
-    total, _ = await _settle_assigned_agent_booking(client, admin_auth, agent_auth)
-    amount = round(total * 70 / 100)
+    total, processing_fee, _ = await _settle_assigned_agent_booking(
+        client, admin_auth, agent_auth
+    )
+    amount = round((total - processing_fee) * 70 / 100)
     await client.put(
         "/api/staff/settings",
         json={

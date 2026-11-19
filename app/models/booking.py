@@ -48,6 +48,7 @@ class Booking(TimestampMixin, Base):
     cleaning_fee: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     security_deposit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     subtotal: Mapped[int] = mapped_column(Integer, nullable=False)
+    processing_fee: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="NGN", nullable=False)
 
@@ -129,6 +130,7 @@ class EscrowAllocation(TimestampMixin, Base):
         String(40), ForeignKey("users.id", ondelete="RESTRICT"), index=True, nullable=False
     )
     gross_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    processing_fee: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     agent_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     platform_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     agent_percent: Mapped[int] = mapped_column(Integer, nullable=False)

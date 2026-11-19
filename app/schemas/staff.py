@@ -250,6 +250,7 @@ class EscrowAllocationOut(CamelModel):
     booking_id: str
     agent_id: str
     gross_amount: int
+    processing_fee: int
     agent_amount: int
     platform_amount: int
     agent_percent: int

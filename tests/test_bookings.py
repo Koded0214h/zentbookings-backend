@@ -54,9 +54,10 @@ async def test_create_booking_success(client, booking_property, fake_bachs):
     assert body["booking"]["status"] == "PENDING_PAYMENT"
     assert body["booking"]["nights"] == 2
     assert body["booking"]["subtotal"] == 850000 * 2
-    assert body["booking"]["totalAmount"] == 850000 * 2  # no cleaning/deposit by default
+    assert body["booking"]["processingFee"] == 34_000
+    assert body["booking"]["totalAmount"] == 1_734_000
     assert body["payment"]["authorizationUrl"].startswith("https://checkout.bachs.io/")
-    assert fake_bachs["init"][0]["amount"] == 850000 * 2
+    assert fake_bachs["init"][0]["amount"] == 1_734_000
 
 
 async def test_create_booking_checkout_before_checkin_is_422(
