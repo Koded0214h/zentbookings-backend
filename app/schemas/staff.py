@@ -36,9 +36,7 @@ class AdminUserOut(CamelModel):
     last_seen_at: datetime | None = None
     created_at: datetime | None = None
 
-    @field_serializer(
-        "last_login_at", "last_seen_at", "created_at", when_used="json"
-    )
+    @field_serializer("last_login_at", "last_seen_at", "created_at", when_used="json")
     def _ser_dt(self, v: datetime | None) -> str | None:
         return _iso_z(v)
 
@@ -262,3 +260,120 @@ class AdminWalletOut(CamelModel):
     user_id: str
     balance: int
     currency: str
+
+
+class AdminWalletListResponse(CamelModel):
+    wallets: list[AdminWalletOut]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class AdminEscrowListResponse(CamelModel):
+    allocations: list[EscrowAllocationOut]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class AdminPayoutListResponse(CamelModel):
+    payouts: list[PayoutOut]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class PageMeta(CamelModel):
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class AdminDashboardOut(CamelModel):
+    gross_collections: int
+    booking_revenue: int
+    processing_fees: int
+    agent_share: int
+    platform_revenue: int
+    refunded_amount: int
+    chargeback_amount: int
+    wallet_liability: int
+    pending_payout_amount: int
+    pending_payout_count: int
+    completed_payout_amount: int
+    successful_payments: int
+    active_bookings: int
+    total_users: int
+    active_listings: int
+    monthly_revenue: list[dict]
+
+
+class AdminPaymentOut(CamelModel):
+    id: str
+    booking_id: str
+    provider: str
+    reference: str
+    amount: int
+    currency: str
+    status: Literal["PENDING", "SUCCESS", "FAILED"]
+    guest_email: EmailStr | None = None
+    property_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminPaymentListResponse(PageMeta):
+    payments: list[AdminPaymentOut]
+
+
+class PaymentAdjustmentCreate(CamelModel):
+    type: Literal["REFUND", "CHARGEBACK"]
+    amount: int = Field(gt=0)
+    reason: str = Field(min_length=2, max_length=500)
+    status: Literal["PENDING", "COMPLETED"] = "PENDING"
+    provider_reference: str | None = Field(default=None, max_length=120)
+
+
+class PaymentAdjustmentUpdate(CamelModel):
+    status: Literal["PENDING", "COMPLETED", "FAILED", "CANCELLED"]
+    provider_reference: str | None = Field(default=None, max_length=120)
+
+
+class PaymentAdjustmentOut(CamelModel):
+    id: str
+    payment_id: str
+    type: Literal["REFUND", "CHARGEBACK"]
+    amount: int
+    currency: str
+    status: Literal["PENDING", "COMPLETED", "FAILED", "CANCELLED"]
+    reason: str
+    provider_reference: str | None = None
+    created_by: str | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+
+class AdminPaymentDetailOut(AdminPaymentOut):
+    adjustments: list[PaymentAdjustmentOut]
+
+
+class AdminBookingUpdate(CamelModel):
+    status: Literal["ACTIVE", "COMPLETED", "CANCELLED"] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PlatformConfigOut(CamelModel):
+    currency: str
+    payment_provider: str
+    agent_revenue_percent: int
+    platform_revenue_percent: int
+    processing_fee_percent: int
+    payment_timeout_minutes: int
+    bachs_configured: bool
+    ninja_configured: bool
+    smtp_configured: bool
+    cloudinary_configured: bool

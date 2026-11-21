@@ -20,6 +20,8 @@ from app.models.user import TimestampMixin, _utcnow, gen_id
 BOOKING_STATUSES = ("PENDING_PAYMENT", "CONFIRMED", "ACTIVE", "COMPLETED", "CANCELLED")
 ACTIVE_BOOKING_STATUSES = ("CONFIRMED", "ACTIVE")  # these actually block a date range
 PAYMENT_STATUSES = ("PENDING", "SUCCESS", "FAILED")
+PAYMENT_ADJUSTMENT_TYPES = ("REFUND", "CHARGEBACK")
+PAYMENT_ADJUSTMENT_STATUSES = ("PENDING", "COMPLETED", "FAILED", "CANCELLED")
 WALLET_TX_TYPES = ("CREDIT", "DEBIT", "REFUND")
 PAYOUT_STATUSES = ("PENDING", "APPROVED", "DISBURSED", "REJECTED", "FAILED")
 
@@ -77,6 +79,35 @@ class Payment(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
     raw_payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class PaymentAdjustment(TimestampMixin, Base):
+    """Auditable refund/chargeback record.
+
+    Provider-side refunds are deliberately not implied by this row. An admin records
+    the provider reference and marks the adjustment complete only after the money has
+    actually moved.
+    """
+
+    __tablename__ = "payment_adjustments"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: gen_id("adj"))
+    payment_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("payments.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    type: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="NGN", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    provider_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
